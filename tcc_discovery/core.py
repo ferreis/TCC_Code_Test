@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import gc
 import json
-import math
 import os
 import re
 import shutil
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
-# Ajuda a evitar fragmentação do allocator em GPUs pequenas (ex.: GTX 1660 6 GB).
-# Precisa ser definido antes da primeira inicialização CUDA do PyTorch.
+# Ajuda a reduzir fragmentação do allocator em GPUs pequenas.
+# Deve ser definido antes da primeira inicialização CUDA do PyTorch.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import cv2
@@ -29,23 +28,38 @@ class DiscoveryConfig:
     sam_checkpoint: str = "weights/sam_vit_b_01ec64.pth"
     sam_model_type: str = "vit_b"
     dino_model: str = "facebook/dinov2-small"
-    points_per_side: int = 24
-    # Esse parâmetro é o principal controle de pico de VRAM do AutomaticMaskGenerator.
-    # O padrão original do SAM é 64; 8 é muito mais seguro para GPUs de 6 GB.
-    points_per_batch: int = 8
+
+    # AutomaticMaskGenerator
+    points_per_side: int = 16
+    points_per_batch: int = 4
     pred_iou_thresh: float = 0.86
     stability_score_thresh: float = 0.92
-    # crop_n_layers=1 aumenta bastante trabalho e memória. Começamos em 0.
     crop_n_layers: int = 0
     min_mask_region_area: int = 80
+
+    # Filtros das propostas
     min_area_px: int = 120
     max_area_fraction: float = 0.70
     max_objects_per_image: int = 40
+    max_candidates_per_tile: int = 80
     nms_iou: float = 0.82
     crop_padding: float = 0.08
+
+    # Tiling. Se tile_size > 0, ele tem prioridade sobre auto_tile_large_images.
     tile_size: int = 0
     tile_overlap: float = 0.15
-    embedding_batch_size: int = 8
+    auto_tile_large_images: bool = True
+    auto_tile_size: int = 512
+    auto_tile_trigger_px: int = 1024
+
+    # Se mesmo um tile pequeno estourar VRAM, subdivide até este tamanho.
+    oom_retry_min_tile: int = 256
+    # Último recurso: move o SAM para CPU e continua, em vez de abortar o projeto.
+    cpu_fallback_on_oom: bool = True
+
+    # Embeddings / clustering
+    embedding_batch_size: int = 4
+    dino_cpu_fallback_on_oom: bool = True
     min_cluster_size: int = 6
     min_samples: int = 3
     pca_components: int = 50
@@ -55,9 +69,7 @@ def list_images(root: str | Path) -> list[Path]:
     root = Path(root)
     if root.is_file() and root.suffix.lower() in IMAGE_SUFFIXES:
         return [root]
-    return sorted(
-        p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
-    )
+    return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES)
 
 
 def load_rgb(path: str | Path) -> np.ndarray:
@@ -94,7 +106,7 @@ def _box_iou(a: list[int], b: list[int]) -> float:
 def _nms(candidates: list[dict], iou_threshold: float, limit: int) -> list[dict]:
     candidates = sorted(
         candidates,
-        key=lambda x: (float(x.get("stability_score", 0.0)) + float(x.get("predicted_iou", 0.0))),
+        key=lambda x: float(x.get("stability_score", 0.0)) + float(x.get("predicted_iou", 0.0)),
         reverse=True,
     )
     kept: list[dict] = []
@@ -120,6 +132,29 @@ def _iter_tiles(width: int, height: int, tile_size: int, overlap: float):
     for y in sorted(set(ys)):
         for x in sorted(set(xs)):
             yield x, y, min(width, x + tile_size), min(height, y + tile_size)
+
+
+def _effective_tile_size(width: int, height: int, config: DiscoveryConfig) -> int:
+    if config.tile_size > 0:
+        return int(config.tile_size)
+    if config.auto_tile_large_images and max(width, height) > int(config.auto_tile_trigger_px):
+        return int(config.auto_tile_size)
+    return 0
+
+
+def _split_box(box: tuple[int, int, int, int]) -> list[tuple[int, int, int, int]]:
+    x1, y1, x2, y2 = box
+    w, h = x2 - x1, y2 - y1
+    if w <= 1 or h <= 1:
+        return [box]
+    mx, my = x1 + w // 2, y1 + h // 2
+    boxes = [
+        (x1, y1, mx, my),
+        (mx, y1, x2, my),
+        (x1, my, mx, y2),
+        (mx, my, x2, y2),
+    ]
+    return [b for b in boxes if b[2] > b[0] and b[3] > b[1]]
 
 
 def _crop_box(box: list[int], width: int, height: int, padding: float) -> list[int]:
@@ -188,6 +223,27 @@ def _release_accelerator_memory() -> None:
             pass
 
 
+def _sam_model(mask_generator):
+    return mask_generator.predictor.model
+
+
+def _sam_device(mask_generator) -> str:
+    try:
+        return next(_sam_model(mask_generator).parameters()).device.type
+    except Exception:
+        return "unknown"
+
+
+def _move_sam(mask_generator, device: str) -> None:
+    try:
+        if hasattr(mask_generator.predictor, "reset_image"):
+            mask_generator.predictor.reset_image()
+    except Exception:
+        pass
+    _sam_model(mask_generator).to(device=device)
+    _release_accelerator_memory()
+
+
 def _build_sam(config: DiscoveryConfig):
     from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 
@@ -209,52 +265,123 @@ def _build_sam(config: DiscoveryConfig):
     )
 
 
-def _discover_image(image: np.ndarray, mask_generator, config: DiscoveryConfig) -> list[dict]:
+def _proposal_to_candidate(
+    proposal: dict,
+    tx1: int,
+    ty1: int,
+    image_area: int,
+    config: DiscoveryConfig,
+) -> dict | None:
+    local_mask = proposal["segmentation"].astype(np.uint8)
+    local_box = _mask_bbox(local_mask)
+    if local_box is None:
+        return None
+    lx1, ly1, lx2, ly2 = local_box
+    box = [lx1 + tx1, ly1 + ty1, lx2 + tx1, ly2 + ty1]
+    area = int(proposal.get("area", int(local_mask.sum())))
+    if area < config.min_area_px or area > image_area * config.max_area_fraction:
+        return None
+    return {
+        "bbox_xyxy": box,
+        "mask_bbox_xyxy": box,
+        "mask_crop": local_mask[ly1:ly2, lx1:lx2].copy(),
+        "area": area,
+        "predicted_iou": float(proposal.get("predicted_iou", 0.0)),
+        "stability_score": float(proposal.get("stability_score", 0.0)),
+    }
+
+
+def _discover_image(
+    image: np.ndarray,
+    mask_generator,
+    config: DiscoveryConfig,
+    progress_cb: ProgressCallback | None = None,
+    image_name: str = "imagem",
+) -> list[dict]:
+    """Segmenta uma imagem usando tiles adaptativos para limitar o pico de VRAM.
+
+    Para imagens grandes, o modo automático evita passar o frame completo ao
+    AutomaticMaskGenerator. Se um tile ainda causar OOM, ele é subdividido.
+    Como último recurso, o SAM é movido para CPU e o processamento continua.
+    """
     h, w = image.shape[:2]
     image_area = h * w
+    effective_tile = _effective_tile_size(w, h, config)
+    queue = list(_iter_tiles(w, h, effective_tile, config.tile_overlap))
     candidates: list[dict] = []
-    for tx1, ty1, tx2, ty2 in _iter_tiles(w, h, config.tile_size, config.tile_overlap):
+    processed = 0
+
+    while queue:
+        tx1, ty1, tx2, ty2 = queue.pop(0)
+        tile_w, tile_h = tx2 - tx1, ty2 - ty1
         tile = image[ty1:ty2, tx1:tx2]
         try:
             masks = mask_generator.generate(tile)
-        except torch.OutOfMemoryError as exc:
+        except torch.OutOfMemoryError:
             _release_accelerator_memory()
-            raise RuntimeError(
-                "CUDA ficou sem memória durante o SAM. Para GPU de 6 GB use "
-                "points_per_batch=4 ou 8, crop_n_layers=0 e points_per_side=16/24. "
-                "Feche outros programas que usam GPU e tente novamente."
-            ) from exc
+            if max(tile_w, tile_h) > int(config.oom_retry_min_tile):
+                subtiles = _split_box((tx1, ty1, tx2, ty2))
+                queue = subtiles + queue
+                if progress_cb:
+                    progress_cb(
+                        processed,
+                        max(processed + len(queue), 1),
+                        f"VRAM cheia em {image_name}; subdividindo tile {tile_w}x{tile_h}",
+                    )
+                del tile
+                continue
+
+            if config.cpu_fallback_on_oom and _sam_device(mask_generator) == "cuda":
+                if progress_cb:
+                    progress_cb(
+                        processed,
+                        max(processed + len(queue) + 1, 1),
+                        f"VRAM insuficiente em {image_name}; continuando SAM na CPU",
+                    )
+                _move_sam(mask_generator, "cpu")
+                masks = mask_generator.generate(tile)
+            else:
+                raise RuntimeError(
+                    "CUDA ficou sem memória mesmo após subdividir a imagem. "
+                    "Ative o fallback para CPU ou reduza points_per_batch para 2."
+                )
+
+        tile_candidates: list[dict] = []
         for proposal in masks:
-            local_mask = proposal["segmentation"].astype(np.uint8)
-            local_box = _mask_bbox(local_mask)
-            if local_box is None:
-                continue
-            lx1, ly1, lx2, ly2 = local_box
-            box = [lx1 + tx1, ly1 + ty1, lx2 + tx1, ly2 + ty1]
-            area = int(proposal.get("area", int(local_mask.sum())))
-            if area < config.min_area_px or area > image_area * config.max_area_fraction:
-                continue
-            candidates.append(
-                {
-                    "bbox_xyxy": box,
-                    "mask_bbox_xyxy": box,
-                    "mask_crop": local_mask[ly1:ly2, lx1:lx2].copy(),
-                    "area": area,
-                    "predicted_iou": float(proposal.get("predicted_iou", 0.0)),
-                    "stability_score": float(proposal.get("stability_score", 0.0)),
-                }
+            cand = _proposal_to_candidate(proposal, tx1, ty1, image_area, config)
+            if cand is not None:
+                tile_candidates.append(cand)
+
+        if tile_candidates:
+            tile_candidates = _nms(
+                tile_candidates,
+                config.nms_iou,
+                max(config.max_candidates_per_tile, config.max_objects_per_image),
             )
-        # O SAM mantém cache CUDA entre chamadas. Em placas pequenas, liberar o cache
-        # entre tiles reduz o risco de fragmentação e não altera os resultados.
+            candidates.extend(tile_candidates)
+            global_limit = max(config.max_objects_per_image * 6, config.max_candidates_per_tile * 2)
+            if len(candidates) > global_limit:
+                candidates = _nms(candidates, config.nms_iou, global_limit)
+
+        processed += 1
+        del masks
+        del tile
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
     return _nms(candidates, config.nms_iou, config.max_objects_per_image)
 
 
-def _embed_crops(crop_paths: list[Path], model_name: str, batch_size: int, progress_cb=None) -> np.ndarray:
+def _embed_crops_once(
+    crop_paths: list[Path],
+    model_name: str,
+    batch_size: int,
+    progress_cb=None,
+    force_cpu: bool = False,
+) -> np.ndarray:
     from transformers import AutoImageProcessor, AutoModel
 
-    device = _device()
+    device = "cpu" if force_cpu else _device()
     processor = AutoImageProcessor.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name).to(device)
     model.eval()
@@ -275,18 +402,26 @@ def _embed_crops(crop_paths: list[Path], model_name: str, batch_size: int, progr
                     for im in images:
                         im.close()
                 if progress_cb:
-                    progress_cb(min(start + len(batch_paths), total), total, "Extraindo embeddings DINOv2")
-    except torch.OutOfMemoryError as exc:
-        _release_accelerator_memory()
-        raise RuntimeError(
-            "CUDA ficou sem memória no DINOv2. Reduza embedding_batch_size para 2 ou 4."
-        ) from exc
+                    suffix = " (CPU)" if force_cpu else ""
+                    progress_cb(min(start + len(batch_paths), total), total, f"Extraindo embeddings DINOv2{suffix}")
     finally:
         del model
         _release_accelerator_memory()
     if not vectors:
         return np.empty((0, 0), dtype=np.float32)
     return np.concatenate(vectors, axis=0)
+
+
+def _embed_crops(crop_paths: list[Path], model_name: str, batch_size: int, progress_cb=None, cpu_fallback=True) -> np.ndarray:
+    try:
+        return _embed_crops_once(crop_paths, model_name, batch_size, progress_cb, force_cpu=False)
+    except torch.OutOfMemoryError:
+        _release_accelerator_memory()
+        if not cpu_fallback:
+            raise RuntimeError("CUDA ficou sem memória no DINOv2. Reduza embedding_batch_size para 2.")
+        if progress_cb:
+            progress_cb(0, max(len(crop_paths), 1), "DINOv2 sem VRAM; repetindo embeddings na CPU")
+        return _embed_crops_once(crop_paths, model_name, 1, progress_cb, force_cpu=True)
 
 
 def _cluster_embeddings(embeddings: np.ndarray, config: DiscoveryConfig) -> np.ndarray:
@@ -332,7 +467,7 @@ def run_discovery(
     _release_accelerator_memory()
     mask_generator = _build_sam(config)
     catalog = {
-        "version": 1,
+        "version": 2,
         "input_dir": str(input_dir),
         "config": config.__dict__.copy(),
         "images": [],
@@ -348,6 +483,7 @@ def run_discovery(
             rgb = load_rgb(image_path)
             h, w = rgb.shape[:2]
             image_id = f"img_{idx:06d}"
+            effective_tile = _effective_tile_size(w, h, config)
             catalog["images"].append(
                 {
                     "id": image_id,
@@ -355,9 +491,16 @@ def run_discovery(
                     "width": w,
                     "height": h,
                     "name": image_path.name,
+                    "effective_tile_size": effective_tile,
                 }
             )
-            proposals = _discover_image(rgb, mask_generator, config)
+            proposals = _discover_image(
+                rgb,
+                mask_generator,
+                config,
+                progress_cb=progress_cb,
+                image_name=image_path.name,
+            )
             for p_idx, proposal in enumerate(proposals, start=1):
                 obj_id = f"{image_id}_obj_{p_idx:04d}_{uuid.uuid4().hex[:6]}"
                 box = [int(v) for v in proposal["bbox_xyxy"]]
@@ -390,18 +533,25 @@ def run_discovery(
                         "source": "sam_auto",
                     }
                 )
+            save_project(project_dir, catalog)
+            del rgb
+            _release_accelerator_memory()
             if progress_cb:
                 progress_cb(idx, total, f"Segmentado {image_path.name}")
     finally:
-        # Muito importante: não manter SAM e DINOv2 simultaneamente na GTX 1660.
         del mask_generator
         _release_accelerator_memory()
 
-    save_project(project_dir, catalog)
     if not crop_paths:
         return catalog
 
-    embeddings = _embed_crops(crop_paths, config.dino_model, config.embedding_batch_size, progress_cb)
+    embeddings = _embed_crops(
+        crop_paths,
+        config.dino_model,
+        config.embedding_batch_size,
+        progress_cb,
+        cpu_fallback=config.dino_cpu_fallback_on_oom,
+    )
     np.save(project_dir / "embeddings.npy", embeddings)
     labels = _cluster_embeddings(embeddings, config)
     for obj, cluster in zip(catalog["objects"], labels.tolist()):
