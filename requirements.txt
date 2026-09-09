@@ -1,0 +1,15 @@
+torch>=2.2
+torchvision>=0.17
+transformers>=4.44
+segment-anything>=1.0
+hdbscan>=0.8.40
+streamlit>=1.38
+albumentations==1.4.24
+opencv-python-headless>=4.10
+Pillow>=10.0
+numpy>=1.26,<3
+scikit-learn>=1.5
+PyYAML>=6.0
+roboflow>=1.1.45
+python-dotenv>=1.0
+tqdm>=4.66
