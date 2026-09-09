@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import math
 import os
@@ -9,6 +10,10 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
+
+# Ajuda a evitar fragmentação do allocator em GPUs pequenas (ex.: GTX 1660 6 GB).
+# Precisa ser definido antes da primeira inicialização CUDA do PyTorch.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import cv2
 import numpy as np
@@ -24,10 +29,14 @@ class DiscoveryConfig:
     sam_checkpoint: str = "weights/sam_vit_b_01ec64.pth"
     sam_model_type: str = "vit_b"
     dino_model: str = "facebook/dinov2-small"
-    points_per_side: int = 32
+    points_per_side: int = 24
+    # Esse parâmetro é o principal controle de pico de VRAM do AutomaticMaskGenerator.
+    # O padrão original do SAM é 64; 8 é muito mais seguro para GPUs de 6 GB.
+    points_per_batch: int = 8
     pred_iou_thresh: float = 0.86
     stability_score_thresh: float = 0.92
-    crop_n_layers: int = 1
+    # crop_n_layers=1 aumenta bastante trabalho e memória. Começamos em 0.
+    crop_n_layers: int = 0
     min_mask_region_area: int = 80
     min_area_px: int = 120
     max_area_fraction: float = 0.70
@@ -36,7 +45,7 @@ class DiscoveryConfig:
     crop_padding: float = 0.08
     tile_size: int = 0
     tile_overlap: float = 0.15
-    embedding_batch_size: int = 16
+    embedding_batch_size: int = 8
     min_cluster_size: int = 6
     min_samples: int = 3
     pca_components: int = 50
@@ -169,6 +178,16 @@ def _device() -> str:
     return "cpu"
 
 
+def _release_accelerator_memory() -> None:
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        try:
+            torch.cuda.ipc_collect()
+        except Exception:
+            pass
+
+
 def _build_sam(config: DiscoveryConfig):
     from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
 
@@ -182,6 +201,7 @@ def _build_sam(config: DiscoveryConfig):
     return SamAutomaticMaskGenerator(
         sam,
         points_per_side=config.points_per_side,
+        points_per_batch=config.points_per_batch,
         pred_iou_thresh=config.pred_iou_thresh,
         stability_score_thresh=config.stability_score_thresh,
         crop_n_layers=config.crop_n_layers,
@@ -195,7 +215,15 @@ def _discover_image(image: np.ndarray, mask_generator, config: DiscoveryConfig) 
     candidates: list[dict] = []
     for tx1, ty1, tx2, ty2 in _iter_tiles(w, h, config.tile_size, config.tile_overlap):
         tile = image[ty1:ty2, tx1:tx2]
-        masks = mask_generator.generate(tile)
+        try:
+            masks = mask_generator.generate(tile)
+        except torch.OutOfMemoryError as exc:
+            _release_accelerator_memory()
+            raise RuntimeError(
+                "CUDA ficou sem memória durante o SAM. Para GPU de 6 GB use "
+                "points_per_batch=4 ou 8, crop_n_layers=0 e points_per_side=16/24. "
+                "Feche outros programas que usam GPU e tente novamente."
+            ) from exc
         for proposal in masks:
             local_mask = proposal["segmentation"].astype(np.uint8)
             local_box = _mask_bbox(local_mask)
@@ -216,6 +244,10 @@ def _discover_image(image: np.ndarray, mask_generator, config: DiscoveryConfig) 
                     "stability_score": float(proposal.get("stability_score", 0.0)),
                 }
             )
+        # O SAM mantém cache CUDA entre chamadas. Em placas pequenas, liberar o cache
+        # entre tiles reduz o risco de fragmentação e não altera os resultados.
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     return _nms(candidates, config.nms_iou, config.max_objects_per_image)
 
 
@@ -228,19 +260,30 @@ def _embed_crops(crop_paths: list[Path], model_name: str, batch_size: int, progr
     model.eval()
     vectors: list[np.ndarray] = []
     total = len(crop_paths)
-    with torch.inference_mode():
-        for start in range(0, total, batch_size):
-            batch_paths = crop_paths[start : start + batch_size]
-            images = [Image.open(p).convert("RGB") for p in batch_paths]
-            inputs = processor(images=images, return_tensors="pt")
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-            out = model(**inputs).last_hidden_state[:, 0, :]
-            out = torch.nn.functional.normalize(out, p=2, dim=1)
-            vectors.append(out.detach().cpu().numpy().astype(np.float32))
-            for im in images:
-                im.close()
-            if progress_cb:
-                progress_cb(min(start + len(batch_paths), total), total, "Extraindo embeddings DINOv2")
+    try:
+        with torch.inference_mode():
+            for start in range(0, total, batch_size):
+                batch_paths = crop_paths[start : start + batch_size]
+                images = [Image.open(p).convert("RGB") for p in batch_paths]
+                try:
+                    inputs = processor(images=images, return_tensors="pt")
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                    out = model(**inputs).last_hidden_state[:, 0, :]
+                    out = torch.nn.functional.normalize(out, p=2, dim=1)
+                    vectors.append(out.detach().cpu().numpy().astype(np.float32))
+                finally:
+                    for im in images:
+                        im.close()
+                if progress_cb:
+                    progress_cb(min(start + len(batch_paths), total), total, "Extraindo embeddings DINOv2")
+    except torch.OutOfMemoryError as exc:
+        _release_accelerator_memory()
+        raise RuntimeError(
+            "CUDA ficou sem memória no DINOv2. Reduza embedding_batch_size para 2 ou 4."
+        ) from exc
+    finally:
+        del model
+        _release_accelerator_memory()
     if not vectors:
         return np.empty((0, 0), dtype=np.float32)
     return np.concatenate(vectors, axis=0)
@@ -286,6 +329,7 @@ def run_discovery(
     (project_dir / "masks").mkdir(parents=True, exist_ok=True)
     (project_dir / "crops").mkdir(parents=True, exist_ok=True)
 
+    _release_accelerator_memory()
     mask_generator = _build_sam(config)
     catalog = {
         "version": 1,
@@ -297,56 +341,61 @@ def run_discovery(
     crop_paths: list[Path] = []
     total = len(images)
 
-    for idx, image_path in enumerate(images, start=1):
-        if progress_cb:
-            progress_cb(idx - 1, total, f"Segmentando {image_path.name}")
-        rgb = load_rgb(image_path)
-        h, w = rgb.shape[:2]
-        image_id = f"img_{idx:06d}"
-        catalog["images"].append(
-            {
-                "id": image_id,
-                "path": str(image_path),
-                "width": w,
-                "height": h,
-                "name": image_path.name,
-            }
-        )
-        proposals = _discover_image(rgb, mask_generator, config)
-        for p_idx, proposal in enumerate(proposals, start=1):
-            obj_id = f"{image_id}_obj_{p_idx:04d}_{uuid.uuid4().hex[:6]}"
-            box = [int(v) for v in proposal["bbox_xyxy"]]
-            mask_bbox = [int(v) for v in proposal["mask_bbox_xyxy"]]
-            mask_rel = Path("masks") / f"{obj_id}.png"
-            _save_mask_crop(proposal["mask_crop"], project_dir / mask_rel)
-            crop_box = _crop_box(box, w, h, config.crop_padding)
-            x1, y1, x2, y2 = crop_box
-            crop = rgb[y1:y2, x1:x2]
-            crop_rel = Path("crops") / f"{obj_id}.jpg"
-            save_rgb(project_dir / crop_rel, crop)
-            crop_paths.append(project_dir / crop_rel)
-            catalog["objects"].append(
+    try:
+        for idx, image_path in enumerate(images, start=1):
+            if progress_cb:
+                progress_cb(idx - 1, total, f"Segmentando {image_path.name}")
+            rgb = load_rgb(image_path)
+            h, w = rgb.shape[:2]
+            image_id = f"img_{idx:06d}"
+            catalog["images"].append(
                 {
-                    "id": obj_id,
-                    "image_id": image_id,
-                    "image_path": str(image_path),
-                    "image_width": w,
-                    "image_height": h,
-                    "bbox_xyxy": box,
-                    "mask_bbox_xyxy": mask_bbox,
-                    "mask_path": mask_rel.as_posix(),
-                    "crop_path": crop_rel.as_posix(),
-                    "area": int(proposal["area"]),
-                    "predicted_iou": float(proposal["predicted_iou"]),
-                    "stability_score": float(proposal["stability_score"]),
-                    "cluster": -1,
-                    "label": None,
-                    "ignored": False,
-                    "source": "sam_auto",
+                    "id": image_id,
+                    "path": str(image_path),
+                    "width": w,
+                    "height": h,
+                    "name": image_path.name,
                 }
             )
-        if progress_cb:
-            progress_cb(idx, total, f"Segmentado {image_path.name}")
+            proposals = _discover_image(rgb, mask_generator, config)
+            for p_idx, proposal in enumerate(proposals, start=1):
+                obj_id = f"{image_id}_obj_{p_idx:04d}_{uuid.uuid4().hex[:6]}"
+                box = [int(v) for v in proposal["bbox_xyxy"]]
+                mask_bbox = [int(v) for v in proposal["mask_bbox_xyxy"]]
+                mask_rel = Path("masks") / f"{obj_id}.png"
+                _save_mask_crop(proposal["mask_crop"], project_dir / mask_rel)
+                crop_box = _crop_box(box, w, h, config.crop_padding)
+                x1, y1, x2, y2 = crop_box
+                crop = rgb[y1:y2, x1:x2]
+                crop_rel = Path("crops") / f"{obj_id}.jpg"
+                save_rgb(project_dir / crop_rel, crop)
+                crop_paths.append(project_dir / crop_rel)
+                catalog["objects"].append(
+                    {
+                        "id": obj_id,
+                        "image_id": image_id,
+                        "image_path": str(image_path),
+                        "image_width": w,
+                        "image_height": h,
+                        "bbox_xyxy": box,
+                        "mask_bbox_xyxy": mask_bbox,
+                        "mask_path": mask_rel.as_posix(),
+                        "crop_path": crop_rel.as_posix(),
+                        "area": int(proposal["area"]),
+                        "predicted_iou": float(proposal["predicted_iou"]),
+                        "stability_score": float(proposal["stability_score"]),
+                        "cluster": -1,
+                        "label": None,
+                        "ignored": False,
+                        "source": "sam_auto",
+                    }
+                )
+            if progress_cb:
+                progress_cb(idx, total, f"Segmentado {image_path.name}")
+    finally:
+        # Muito importante: não manter SAM e DINOv2 simultaneamente na GTX 1660.
+        del mask_generator
+        _release_accelerator_memory()
 
     save_project(project_dir, catalog)
     if not crop_paths:
