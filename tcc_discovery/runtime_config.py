@@ -126,10 +126,16 @@ def materialize_training_plan(
     models = runtime_config.get("models", {}) or {}
     smoke = runtime_config.get("smoke", {}) or {}
     lora = runtime_config.get("lora", {}) or {}
+    explicit_selection = selected_stages is not None
     chosen = set(selected_stages or configured_stage_ids(plan))
 
     for group in TRAIN_GROUPS:
         for stage_id, item in (plan.get(group, {}) or {}).items():
+            if explicit_selection:
+                # --only deve executar a etapa escolhida mesmo que o template versionado
+                # esteja enabled:false para evitar disparos acidentais em lote.
+                item["enabled"] = stage_id in chosen
+
             if stage_id in {"smoke_det_yolo26n", "det_general"}:
                 item["model"] = str(models.get("detect", "yolo26n.pt"))
             elif stage_id in {"smoke_seg_yolo26n", "seg_general"}:
