@@ -18,6 +18,41 @@ Esse notebook concentra descoberta, clustering, interface Streamlit e a matriz c
    - `NGROK_AUTHTOKEN`: opcional, necessário apenas para abrir a interface Streamlit por URL pública.
 4. Execute as células na ordem.
 
+## Importante: não atualizar pip/setuptools/wheel
+
+O notebook foi ajustado para evitar o aviso do Colab:
+
+```text
+WARNING: The following packages were previously imported in this runtime: [_distutils_hack]
+You must restart the runtime in order to use newly installed versions.
+```
+
+Por isso, **não execute** no Colab:
+
+```bash
+pip install --upgrade pip setuptools wheel
+```
+
+O runtime já fornece essas ferramentas. O notebook instala apenas `requirements-colab.txt`, sem atualizar as ferramentas-base.
+
+Também foi alterada a ordem do setup: o YOLO-Master é instalado **antes do primeiro `import ultralytics`**. Isso evita instalar/substituir o backend depois que o módulo já foi carregado e reduz a necessidade de reiniciar a sessão.
+
+A ordem inicial correta é:
+
+```text
+verificar GPU sem importar torch/ultralytics
+        ↓
+montar Drive
+        ↓
+clonar/atualizar GitHub
+        ↓
+instalar requirements-colab.txt
+        ↓
+instalar YOLO-Master
+        ↓
+importar e validar PyTorch/CUDA/Ultralytics/LoRA
+```
+
 ## Persistência
 
 O notebook monta o Google Drive e usa:
@@ -36,7 +71,7 @@ Essas pastas são ligadas ao repositório clonado em `/content/TCC_Code_Test` po
 
 Use `requirements-colab.txt`. O Colab já fornece PyTorch/CUDA, portanto o arquivo não reinstala `torch` nem `torchvision`.
 
-A distribuição `ultralytics` é instalada para YOLO26. Para os experimentos LoRA, o notebook também instala o fork Tencent/YOLO-Master, que mantém a API Ultralytics e acrescenta suporte experimental a LoRA.
+A distribuição `ultralytics` é instalada como dependência base. Em seguida, antes do primeiro import, o notebook instala o fork Tencent/YOLO-Master em modo editável. Os experimentos Base, LoRA e Full da sessão passam então a usar a mesma implementação.
 
 ## Fluxo de descoberta recomendado
 
