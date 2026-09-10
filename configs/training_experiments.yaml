@@ -1,0 +1,126 @@
+# Matriz experimental do TCC
+#
+# Comparação principal:
+#   1) Base = backbone congelado, treina neck/head sobre pesos pré-treinados
+#   2) LoRA = adaptação de baixa dimensão via YOLO-Master
+#   3) Full fine-tune = todos os pesos treináveis
+#
+# O mesmo protocolo é repetido para detecção e segmentação.
+# A escala inicial é YOLO26n para caber confortavelmente em uma Tesla T4 e
+# permitir validar todo o pipeline antes de escalar para s/m.
+
+global:
+  epochs: 100
+  imgsz: 640
+  batch: 16
+  device: 0
+  workers: 2
+  amp: true
+  optimizer: auto
+  patience: 30
+  seed: 42
+  deterministic: true
+  cache: false
+  close_mosaic: 10
+  save_period: 10
+  plots: true
+  verbose: true
+  project: workspace/training_runs
+  eval_split: test
+
+experiments:
+  detect_base:
+    enabled: true
+    task: detect
+    regime: frozen_backbone
+    model: yolo26n.pt
+    data: data/roboflow/data.yaml
+    name: detect_yolo26n_base
+    train_args:
+      freeze: 11
+
+  detect_lora:
+    enabled: true
+    task: detect
+    regime: lora
+    backend: yolo-master
+    model: yolo26n.pt
+    data: data/roboflow/data.yaml
+    name: detect_yolo26n_lora
+    train_args:
+      lora_r: 16
+      lora_alpha: 32
+      lora_dropout: 0.10
+      lora_gradient_checkpointing: true
+      lora_include_head: true
+
+  detect_full:
+    enabled: true
+    task: detect
+    regime: full_finetune
+    model: yolo26n.pt
+    data: data/roboflow/data.yaml
+    name: detect_yolo26n_full
+    train_args:
+      freeze: 0
+
+  segment_base:
+    enabled: true
+    task: segment
+    regime: frozen_backbone
+    model: yolo26n-seg.pt
+    data: data/segmentation/data.yaml
+    name: segment_yolo26n_base
+    train_args:
+      freeze: 11
+
+  segment_lora:
+    enabled: true
+    task: segment
+    regime: lora
+    backend: yolo-master
+    model: yolo26n-seg.pt
+    data: data/segmentation/data.yaml
+    name: segment_yolo26n_lora
+    train_args:
+      lora_r: 16
+      lora_alpha: 32
+      lora_dropout: 0.10
+      lora_gradient_checkpointing: true
+      lora_include_head: true
+
+  segment_full:
+    enabled: true
+    task: segment
+    regime: full_finetune
+    model: yolo26n-seg.pt
+    data: data/segmentation/data.yaml
+    name: segment_yolo26n_full
+    train_args:
+      freeze: 0
+
+# Testes rápidos para validar ambiente, caminhos e VRAM antes de gastar horas.
+smoke_tests:
+  detect_yolo26n_smoke:
+    enabled: true
+    task: detect
+    regime: smoke
+    model: yolo26n.pt
+    data: data/roboflow/data.yaml
+    name: smoke_detect_yolo26n
+    train_args:
+      epochs: 3
+      batch: 8
+      imgsz: 640
+
+  segment_yolo26n_smoke:
+    enabled: true
+    task: segment
+    regime: smoke
+    model: yolo26n-seg.pt
+    data: data/segmentation/data.yaml
+    name: smoke_segment_yolo26n
+    train_args:
+      epochs: 3
+      batch: 8
+      imgsz: 640
