@@ -6,11 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-# Quando este arquivo é executado como `python scripts/train_experiments.py`,
-# o Python coloca `scripts/` (e não a raiz do repositório) em sys.path[0].
-# Como `tcc_discovery/` é um diretório irmão de `scripts/`, o import abaixo
-# falhava no Colab. Inserimos explicitamente a raiz e também executamos a CLI
-# a partir dela para que caminhos relativos de configs/dados sejam estáveis.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -18,46 +13,60 @@ os.chdir(REPO_ROOT)
 
 from tcc_discovery.training_experiments import load_experiment_config, list_experiments, run_matrix
 
+GROUP_CHOICES = [
+    "general_models",
+    "lora_specialists",
+    "full_finetune_controls",
+    "smoke_tests",
+    "experiments",  # alias: todas as etapas de treino, sem smoke tests
+    "all",
+]
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Executa a matriz experimental YOLO26 do TCC e consolida métricas/parâmetros."
+        description=(
+            "Executa etapas separadas do TCC: modelo geral, adapters LoRA especialistas "
+            "e controles Full Fine-Tune."
+        )
     )
     parser.add_argument(
         "--config",
         default=str(REPO_ROOT / "configs" / "training_experiments.yaml"),
-        help="Arquivo YAML da matriz experimental.",
+        help="Arquivo YAML do plano de treinamento.",
     )
     parser.add_argument(
         "--group",
-        choices=["experiments", "smoke_tests", "all"],
-        default="experiments",
-        help="Conjunto de experimentos a executar.",
+        choices=GROUP_CHOICES,
+        default="general_models",
+        help="Etapa a executar. LoRAs não são executados automaticamente junto com o modelo geral.",
     )
     parser.add_argument(
         "--only",
         nargs="*",
         default=None,
-        help="Executa apenas os nomes informados.",
+        help="Executa apenas os IDs informados, mesmo que pertençam a grupos diferentes.",
     )
     parser.add_argument("--resume", action="store_true", help="Retoma de last.pt quando disponível.")
     parser.add_argument("--no-eval", action="store_true", help="Não roda validação final após o treino.")
     parser.add_argument(
         "--fail-on-missing-data",
         action="store_true",
-        help="Falha se um dataset estiver ausente; por padrão o experimento é apenas pulado.",
+        help="Falha se um dataset estiver ausente; por padrão a etapa é pulada.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Mostra configuração resolvida sem treinar.")
-    parser.add_argument("--list", action="store_true", help="Lista os experimentos e encerra.")
+    parser.add_argument("--list", action="store_true", help="Lista as etapas e encerra.")
     args = parser.parse_args()
 
     if args.list:
         cfg = load_experiment_config(args.config)
         for name, exp in list_experiments(cfg, args.group).items():
             enabled = exp.get("enabled", True)
+            source = exp.get("base_from") or exp.get("model")
             print(
-                f"{name:28s} enabled={str(enabled):5s} "
-                f"task={exp.get('task')} regime={exp.get('regime')} model={exp.get('model')}"
+                f"{name:20s} enabled={str(enabled):5s} "
+                f"task={exp.get('task'):7s} regime={exp.get('regime'):28s} "
+                f"source={source} | {exp.get('label', '')}"
             )
         return
 
