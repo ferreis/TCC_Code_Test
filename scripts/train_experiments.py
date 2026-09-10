@@ -2,6 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+# Quando este arquivo é executado como `python scripts/train_experiments.py`,
+# o Python coloca `scripts/` (e não a raiz do repositório) em sys.path[0].
+# Como `tcc_discovery/` é um diretório irmão de `scripts/`, o import abaixo
+# falhava no Colab com ModuleNotFoundError. Inserimos explicitamente a raiz do
+# repositório antes de importar o pacote do projeto.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from tcc_discovery.training_experiments import load_experiment_config, list_experiments, run_matrix
 
