@@ -43,6 +43,7 @@ def prepare_uploaded_media(
     cache_root: str | Path = "workspace/_uploads",
     sample_every_seconds: float = 1.0,
     max_frames: int = 120,
+    extract_all_frames: bool = False,
     start_seconds: float = 0.0,
     end_seconds: float | None = None,
     overwrite: bool = True,
@@ -50,10 +51,14 @@ def prepare_uploaded_media(
 ) -> dict:
     """Materializa um upload de imagem/vídeo como uma pasta de frames.
 
-    A pasta de frames fica fora do diretório do projeto de clustering. Assim,
-    `run_discovery(..., overwrite=True)` pode recriar o projeto sem apagar o
-    arquivo enviado. O hash do conteúdo torna a operação reproduzível e evita
-    colisões de nomes.
+    Para vídeo há dois modos:
+    - ``extract_all_frames=True``: mantém todos os frames do intervalo escolhido;
+    - ``extract_all_frames=False``: amostra segundo ``sample_every_seconds``.
+
+    ``max_frames=0`` significa sem limite. Um valor positivo limita a quantidade
+    final de frames extraídos. A pasta de frames fica fora do diretório do
+    projeto de clustering para que o projeto possa ser recriado sem apagar a
+    mídia enviada.
     """
     if not data:
         raise ValueError("Upload vazio.")
@@ -93,6 +98,8 @@ def prepare_uploaded_media(
             "fps": None,
             "duration_seconds": None,
             "sample_every_seconds": None,
+            "extract_all_frames": False,
+            "max_frames": 1,
             "start_seconds": 0.0,
             "end_seconds": None,
         }
@@ -131,16 +138,24 @@ def prepare_uploaded_media(
         if total_frames > 0:
             end_frame = min(max(start_frame + 1, end_frame), total_frames)
 
-        step = max(1, int(round(max(0.01, float(sample_every_seconds)) * fps)))
+        if extract_all_frames:
+            step = 1
+            resolved_sample_every = 1.0 / fps
+        else:
+            resolved_sample_every = max(0.01, float(sample_every_seconds))
+            step = max(1, int(round(resolved_sample_every * fps)))
+
+        frame_limit = int(max_frames)
+        unlimited = frame_limit <= 0
+
         if total_frames > 0:
             indices = list(range(start_frame, end_frame, step))
         else:
-            # Fallback para vídeos que não informam frame_count corretamente.
             indices = []
 
-        max_frames = max(1, int(max_frames))
-        if indices and len(indices) > max_frames:
-            positions = np.linspace(0, len(indices) - 1, max_frames, dtype=int)
+        if indices and not unlimited and len(indices) > frame_limit:
+            # Mantém cobertura de toda a duração escolhida quando existe limite.
+            positions = np.linspace(0, len(indices) - 1, frame_limit, dtype=int)
             indices = [indices[int(i)] for i in positions]
 
         saved = 0
@@ -161,12 +176,15 @@ def prepare_uploaded_media(
                 if progress_cb:
                     progress_cb(i, total_targets, f"Extraindo frame {i}/{total_targets}")
         else:
-            # Leitura sequencial quando a duração/frame_count não está disponível.
-            frame_idx = 0
+            # Leitura sequencial quando frame_count/duração não está disponível.
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+            frame_idx = start_frame
             next_keep = start_frame
-            while saved < max_frames:
+            while unlimited or saved < frame_limit:
                 ok, bgr = cap.read()
                 if not ok or bgr is None:
+                    break
+                if resolved_end is not None and (frame_idx / fps) >= resolved_end:
                     break
                 if frame_idx >= next_keep:
                     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
@@ -176,7 +194,7 @@ def prepare_uploaded_media(
                     _write_rgb_jpeg(frame_path, rgb)
                     next_keep = frame_idx + step
                     if progress_cb:
-                        progress_cb(saved, max_frames, f"Extraindo frame {saved}")
+                        progress_cb(saved, max(saved, 1), f"Extraindo frame {saved}")
                 frame_idx += 1
 
         if saved == 0:
@@ -194,7 +212,9 @@ def prepare_uploaded_media(
             "sampled_frames": saved,
             "fps": fps,
             "duration_seconds": duration,
-            "sample_every_seconds": float(sample_every_seconds),
+            "sample_every_seconds": resolved_sample_every,
+            "extract_all_frames": bool(extract_all_frames),
+            "max_frames": None if unlimited else frame_limit,
             "start_seconds": start_seconds,
             "end_seconds": resolved_end,
             "source_frame_indices": source_indices,
