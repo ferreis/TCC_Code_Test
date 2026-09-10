@@ -178,6 +178,36 @@ Quando o animal ocupa apenas um ou poucos pixels, nenhuma segmentação consegue
 
 Para vídeos, o plano é combinar detecção por frame com rastreamento/consistência temporal. Um candidato que aparece de forma coerente em quadros consecutivos merece prioridade maior na auditoria do que um único pixel branco isolado em um só frame.
 
+## Google Colab
+
+Existe um notebook pronto em:
+
+```text
+notebooks/TCC_Object_Discovery_Colab.ipynb
+```
+
+Ele monta o Google Drive e mantém de forma persistente:
+
+```text
+MyDrive/TCC_Code_Test_runtime/
+├── data/
+├── workspace/
+├── exports/
+└── weights/
+```
+
+Use `requirements-colab.txt`, que evita reinstalar `torch`/`torchvision` sobre o runtime CUDA já fornecido pelo Colab.
+
+No **Colab > Secrets**, configure:
+
+```text
+GITHUB_TOKEN
+ROBOFLOW_API_KEY
+NGROK_AUTHTOKEN   # opcional, só para abrir o Streamlit
+```
+
+O notebook consegue baixar o dataset YOLO26, preservar pesos/resultados no Drive, executar o clustering das bounding boxes e abrir a mesma interface Streamlit por ngrok. Instruções detalhadas estão em `COLAB.md`.
+
 ## Regras experimentais
 
 - Não misturar `train`, `valid` e `test` na criação do modelo final.
