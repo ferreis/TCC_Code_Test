@@ -106,6 +106,50 @@ run_stage('det_fullft_01')
 
 Os templates LoRA/Full FT ficam `enabled: false` no YAML versionado para evitar execução acidental. O helper cria uma cópia em `workspace/training_plan_runtime.yaml` e ativa somente o ID escolhido.
 
+## Exportação automática para TCC_Analise
+
+Depois de cada treinamento real concluído pelo notebook, `scripts/train_experiments.py` atualiza automaticamente:
+
+```text
+MyDrive/TCC_Code_Test_runtime/exports/
+├── TCC_Analise_models/
+└── TCC_Analise_models.zip
+```
+
+O pacote é organizado para ser extraído/copied diretamente dentro de `TCC_Analise/models/`:
+
+```text
+TCC_Analise_models/
+├── detection/
+│   ├── general/best.pt
+│   ├── lora_01/adapter/
+│   ├── lora_02/adapter/
+│   ├── lora_03/adapter/
+│   ├── lora_04/adapter/
+│   ├── lora_05/adapter/
+│   ├── fullft_01/best.pt
+│   ├── fullft_02/best.pt
+│   ├── fullft_03/best.pt
+│   ├── fullft_04/best.pt
+│   └── fullft_05/best.pt
+├── segmentation/
+│   └── mesma convenção
+├── _metadata/
+│   ├── experiment_summary.csv
+│   └── experiment_summary.json
+└── bundle_manifest.json
+```
+
+Somente artefatos já treinados são copiados. Se uma LoRA ou Full Fine-Tune ainda não existir, ela aparece como ausente no `bundle_manifest.json` e será incluída automaticamente na próxima atualização do pacote.
+
+Também é possível reconstruir o pacote manualmente sem treinar novamente:
+
+```bash
+python scripts/export_analysis_bundle.py
+```
+
+O ZIP fica persistente no Google Drive e pode ser baixado pelo painel de arquivos do Drive/Colab.
+
 ## YOLO26n
 
 YOLO26n é a escala inicial para validar o pipeline e medir custo na Tesla T4. Depois o Modelo Geral pode ser repetido com `s` ou `m` se houver justificativa experimental e memória suficiente.
