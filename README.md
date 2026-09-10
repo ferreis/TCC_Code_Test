@@ -238,14 +238,15 @@ Para vídeos, o plano é combinar detecção por frame com rastreamento/consist�
 
 ## Google Colab
 
-Existem dois notebooks:
+Existe um único notebook principal:
 
 ```text
 notebooks/TCC_Object_Discovery_Colab.ipynb
-notebooks/TCC_YOLO26_Experiments_Colab.ipynb
 ```
 
-Eles utilizam:
+Ele concentra preparação do ambiente, Google Drive, Roboflow, SAM, clustering, interface Streamlit e a matriz de treinamentos YOLO26. Antes dos treinamentos pesados, há uma etapa para encerrar Streamlit/ngrok e liberar a VRAM da mesma GPU.
+
+O notebook utiliza:
 
 ```text
 MyDrive/TCC_Code_Test_runtime/
