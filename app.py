@@ -20,9 +20,11 @@ from tcc_discovery.core import (
     run_discovery,
     save_project,
 )
+from tcc_discovery.upload_clustering import prepare_uploaded_media
 
-APP_VERSION = "0.4-bbox-clustering"
+APP_VERSION = "0.5-upload-clustering"
 _KEEP = object()
+VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm"}
 
 
 def _render_overlay(project_dir: Path, obj: dict):
@@ -72,7 +74,7 @@ def _show_thumbnails(project_dir: Path, group: list[dict], key: str) -> None:
 
 def _project_or_stop(project_dir: Path) -> dict:
     if not (project_dir / "catalog.json").exists():
-        st.warning("Projeto não encontrado. Execute uma descoberta ou o clustering pelas bounding boxes primeiro.")
+        st.warning("Projeto não encontrado. Execute uma descoberta, upload ou clustering pelas bounding boxes primeiro.")
         st.stop()
     catalog = load_project(project_dir)
     if not catalog.get("objects"):
@@ -81,15 +83,28 @@ def _project_or_stop(project_dir: Path) -> dict:
     return catalog
 
 
+def _progress_widgets():
+    bar = st.progress(0.0)
+    status = st.empty()
+
+    def progress(done, total, message):
+        if total:
+            bar.progress(min(1.0, max(0.0, done / total)))
+        status.write(message)
+
+    return bar, status, progress
+
+
 st.set_page_config(page_title="TCC - Object Discovery Lab", layout="wide")
 st.title("Object Discovery Lab")
 st.caption(
-    f"{APP_VERSION} · descoberta SAM, clustering pelas boxes existentes e revisão humana separada por estado."
+    f"{APP_VERSION} · upload de imagem/vídeo, descoberta SAM, clustering pelas boxes e revisão humana."
 )
 
 page = st.sidebar.radio(
     "Etapa",
     [
+        "0. Upload e clusterizar",
         "1. Descobrir com SAM",
         "2. Clusterizar bounding boxes",
         "3. Classificar pendentes",
@@ -99,10 +114,125 @@ page = st.sidebar.radio(
         "7. Aumentar dataset",
     ],
 )
-project_dir = Path(st.sidebar.text_input("Projeto local", "workspace/discovery"))
+project_default = "workspace/upload_cluster" if page == "0. Upload e clusterizar" else "workspace/discovery"
+project_dir = Path(st.sidebar.text_input("Projeto local", project_default))
 
 
-if page == "1. Descobrir com SAM":
+if page == "0. Upload e clusterizar":
+    st.subheader("Upload rápido de imagem ou vídeo")
+    st.write(
+        "Envie uma imagem ou vídeo. Imagens são processadas diretamente; vídeos são amostrados em frames. "
+        "Em seguida o SAM gera candidatos, o DINOv2 extrai embeddings e o HDBSCAN forma os clusters."
+    )
+    uploaded = st.file_uploader(
+        "Imagem ou vídeo",
+        type=["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "mp4", "mov", "avi", "mkv", "m4v", "webm"],
+        accept_multiple_files=False,
+    )
+
+    if uploaded is not None:
+        suffix = Path(uploaded.name).suffix.lower()
+        is_video = suffix in VIDEO_SUFFIXES
+        size_mb = len(uploaded.getvalue()) / (1024 * 1024)
+        st.caption(f"Arquivo: {uploaded.name} · {size_mb:.1f} MB")
+        if is_video:
+            st.video(uploaded)
+        else:
+            st.image(uploaded, caption=uploaded.name, use_container_width=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if is_video:
+                sample_every = st.selectbox(
+                    "Extrair 1 frame a cada",
+                    [0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
+                    index=2,
+                    format_func=lambda x: f"{x:g} s",
+                )
+                max_frames = st.number_input("Máximo de frames", 1, 2000, 120, step=10)
+            else:
+                sample_every = 1.0
+                max_frames = 1
+            checkpoint = st.text_input("Checkpoint SAM", "weights/sam_vit_b_01ec64.pth", key="upload_sam_checkpoint")
+
+        with c2:
+            points = st.select_slider("SAM points_per_side", [8, 12, 16, 24, 32], value=16, key="upload_points")
+            points_batch = st.selectbox("SAM points_per_batch", [1, 2, 4, 8, 16], index=2, key="upload_points_batch")
+            max_objects = st.number_input("Máx. objetos por frame", 1, 300, 30, key="upload_max_objects")
+            min_area = st.number_input("Área mínima da máscara (px)", 10, 100000, 80, key="upload_min_area")
+
+        with c3:
+            auto_tile_size = st.selectbox("Auto-tile", [256, 384, 512, 640, 768, 1024], index=2, key="upload_tile")
+            min_cluster = st.number_input("Mínimo por cluster", 2, 100, 3, key="upload_min_cluster")
+            embedding_batch = st.selectbox("Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2, key="upload_dino_batch")
+            overwrite = st.checkbox("Recriar projeto", value=False, key="upload_overwrite")
+
+        st.info(
+            "Para a GTX 1660, os valores padrão são conservadores. No Colab com GPU mais forte você pode aumentar "
+            "points_per_side e o batch do DINOv2. O vídeo mantém referência ao número do frame original."
+        )
+
+        if st.button("Preparar upload e clusterizar", type="primary"):
+            try:
+                prep_bar, prep_status, prep_progress = _progress_widgets()
+                prep_status.write("Preparando mídia...")
+                media_info = prepare_uploaded_media(
+                    uploaded.getvalue(),
+                    uploaded.name,
+                    sample_every_seconds=float(sample_every),
+                    max_frames=int(max_frames),
+                    overwrite=True,
+                    progress_cb=prep_progress,
+                )
+                prep_bar.progress(1.0)
+
+                cfg = DiscoveryConfig(
+                    sam_checkpoint=checkpoint,
+                    points_per_side=int(points),
+                    points_per_batch=int(points_batch),
+                    crop_n_layers=0,
+                    min_area_px=int(min_area),
+                    max_objects_per_image=int(max_objects),
+                    tile_size=0,
+                    auto_tile_large_images=True,
+                    auto_tile_size=int(auto_tile_size),
+                    auto_tile_trigger_px=1024,
+                    embedding_batch_size=int(embedding_batch),
+                    min_cluster_size=int(min_cluster),
+                    cpu_fallback_on_oom=True,
+                    dino_cpu_fallback_on_oom=True,
+                )
+                bar, status, progress = _progress_widgets()
+                catalog = run_discovery(
+                    media_info["frames_dir"],
+                    project_dir,
+                    cfg,
+                    overwrite=overwrite,
+                    progress_cb=progress,
+                )
+                catalog["project_type"] = "upload_clustering"
+                catalog["upload_source"] = media_info
+                save_project(project_dir, catalog)
+                bar.progress(1.0)
+                status.write("Clustering concluído")
+
+                counts = Counter(int(o.get("cluster", -1)) for o in catalog.get("objects", []))
+                regular_clusters = [c for c in counts if c != -1]
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Frames processados", len(catalog.get("images", [])))
+                m2.metric("Objetos propostos", len(catalog.get("objects", [])))
+                m3.metric("Clusters", len(regular_clusters))
+                st.success("Upload processado e clusterizado. Use '3. Classificar pendentes' para revisar os grupos.")
+                if counts:
+                    st.write("Distribuição dos maiores clusters:")
+                    st.json({str(k): int(v) for k, v in counts.most_common(12)})
+            except Exception as exc:
+                st.exception(exc)
+    else:
+        st.caption("Formatos aceitos: JPG/PNG/TIFF/WebP e MP4/MOV/AVI/MKV/M4V/WebM.")
+
+
+elif page == "1. Descobrir com SAM":
     st.subheader("Descoberta não supervisionada com SAM")
     st.caption(
         "Esta etapa é o baseline totalmente automático. Os tiles são internos e as coordenadas voltam para a imagem original, "
@@ -170,14 +300,7 @@ if page == "1. Descobrir com SAM":
             cpu_fallback_on_oom=bool(cpu_fallback),
             dino_cpu_fallback_on_oom=bool(dino_cpu_fallback),
         )
-        bar = st.progress(0.0)
-        status = st.empty()
-
-        def progress(done, total, message):
-            if total:
-                bar.progress(min(1.0, max(0.0, done / total)))
-            status.write(message)
-
+        bar, status, progress = _progress_widgets()
         try:
             catalog = run_discovery(input_dir, project_dir, cfg, overwrite=overwrite, progress_cb=progress)
             st.success(f"Concluído: {len(catalog['images'])} imagens e {len(catalog['objects'])} objetos propostos.")
@@ -215,14 +338,7 @@ elif page == "2. Clusterizar bounding boxes":
             embedding_batch_size=int(embedding_batch),
             dino_cpu_fallback_on_oom=bool(dino_cpu_fallback),
         )
-        bar = st.progress(0.0)
-        status = st.empty()
-
-        def progress(done, total, message):
-            if total:
-                bar.progress(min(1.0, max(0.0, done / total)))
-            status.write(message)
-
+        bar, status, progress = _progress_widgets()
         try:
             catalog = run_box_clustering(split_dir, project_dir, cfg, overwrite=overwrite, progress_cb=progress)
             st.success(
