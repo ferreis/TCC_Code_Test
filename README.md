@@ -1,16 +1,14 @@
-# TCC Code Test — Object Discovery Lab
+# TCC Code Test — Object Discovery & Training Lab
 
-Protótipo para descoberta, agrupamento, revisão e treinamento de modelos em imagens aéreas de cetáceos.
+Protótipo para descoberta, agrupamento, revisão, segmentação e treinamento de modelos em imagens aéreas de cetáceos.
 
-O projeto possui fluxos complementares:
+O projeto possui três frentes complementares:
 
-1. **Baseline totalmente automático:** imagem → SAM → propostas/máscaras → DINOv2 → HDBSCAN.
-2. **Fluxo recomendado para o dataset já anotado:** bounding boxes Roboflow → crops completos → DINOv2 → HDBSCAN → revisão humana → SAM guiado pela box (próxima etapa) → segmentação.
-3. **Matriz experimental YOLO26:** Detection e Segmentation em três regimes comparáveis: Base, LoRA e Full fine-tune.
+1. **Baseline automático:** imagem → SAM → propostas/máscaras → DINOv2 → HDBSCAN.
+2. **Fluxo recomendado para o dataset anotado:** bounding boxes Roboflow → crops completos → DINOv2 → HDBSCAN → revisão humana → SAM guiado pela box → segmentação.
+3. **Treinamento modular YOLO26:** um Modelo Geral treinado em dataset amplo e vários adapters LoRA especialistas treinados separadamente em datasets pequenos, com controles Full Fine-Tune equivalentes.
 
-A segunda abordagem evita que um cetáceo já anotado seja cortado em partes apenas porque atravessa a borda de um tile.
-
-## Instalação
+## Instalação local
 
 ```bash
 python3 -m venv .venv
@@ -46,21 +44,13 @@ Estrutura esperada:
 
 ```text
 data/roboflow/
-├── train/
-│   ├── images/
-│   └── labels/
-├── valid/
-│   ├── images/
-│   └── labels/
-├── test/
-│   ├── images/
-│   └── labels/
+├── train/images + labels
+├── valid/images + labels
+├── test/images + labels
 └── data.yaml
 ```
 
 ## SAM
-
-O protótipo usa SAM ViT-B:
 
 ```bash
 python scripts/download_sam.py
@@ -72,181 +62,143 @@ Checkpoint padrão:
 weights/sam_vit_b_01ec64.pth
 ```
 
-## Interface
+## Interface de descoberta/revisão
 
 ```bash
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True streamlit run app.py
 ```
 
-### 0. Upload e clusterizar
+A interface permite upload de imagem/vídeo, baseline SAM, clustering de bounding boxes, classificação de clusters, revisão de classificados/ignorados, exportação e augmentation.
 
-Permite enviar uma imagem ou vídeo, extrair todos os frames ou amostrar por intervalo e executar SAM → DINOv2 → HDBSCAN. O vídeo preserva a referência ao frame original.
+## Clustering das bounding boxes
 
-### 1. Descobrir com SAM
-
-Baseline sem usar as anotações existentes. Para imagens grandes, o sistema usa tiles adaptativos e devolve as coordenadas para o sistema da imagem original.
-
-Esse fluxo é útil como experimento, mas um objeto que atravesse exatamente uma borda de tile ainda pode aparecer em fragmentos. Por isso ele não é o fluxo principal para as bounding boxes já revisadas.
-
-### 2. Clusterizar bounding boxes
-
-Fluxo recomendado para o dataset atual.
-
-Use um projeto separado, por exemplo:
+O fluxo recomendado para as anotações existentes é:
 
 ```text
-workspace/bbox_clusters_v1
+Bounding boxes Roboflow
+        ↓
+crops completos + contexto
+        ↓
+DINOv2
+        ↓
+HDBSCAN
+        ↓
+revisão humana
 ```
 
-Pasta do split:
+Configuração inicial:
 
 ```text
-data/roboflow/train
-```
-
-Cada anotação YOLO é convertida de coordenadas normalizadas para pixels, o cetáceo é recortado inteiro com contexto ao redor e o crop é enviado ao DINOv2. O HDBSCAN agrupa os embeddings visualmente semelhantes.
-
-Configuração inicial recomendada:
-
-```text
-Contexto ao redor da box: 1.8
+Contexto: 1.8
 Crop mínimo: 64 px
 Mínimo por cluster: 6
-Batch DINOv2: 4
 Fallback CPU: ligado
 ```
 
-Para objetos de poucos pixels, o crop mínimo evita enviar ao encoder uma região extremamente pequena. Isso não cria detalhe inexistente na imagem, apenas preserva um contexto controlado para o embedding.
+## Treinamento YOLO26 — nomenclatura
 
-### 3. Classificar pendentes
+A nomenclatura antiga `Base | Base + LoRA | Full` foi removida. Ela sugeria três treinamentos paralelos sobre o mesmo dataset e não representava a hipótese do TCC.
 
-A fila mostra apenas objetos ainda sem decisão.
-
-Ao aplicar uma classe ao grupo, ele sai da fila de pendentes. Ao ignorar, ele vai para a fila de ignorados.
-
-### 4. Revisar classificados
-
-Mostra objetos e clusters que já receberam classe. É possível:
-
-- alterar a classe do grupo;
-- reabrir o grupo como pendente;
-- mudar apenas um objeto;
-- marcar um falso positivo como ignorado.
-
-### 5. Revisar ignorados
-
-Permite restaurar um grupo ou objeto descartado sem apagar informação do `catalog.json`.
-
-## Estado do projeto
-
-Projeto SAM:
+Agora usamos:
 
 ```text
-workspace/discovery/
-├── catalog.json
-├── embeddings.npy
-├── crops/
-└── masks/
+Modelo Geral
+LoRA Especialista 01..05
+Full Fine-Tune Controle 01..05
+Smoke Test YOLO26n
 ```
 
-Projeto de bounding boxes:
+### 1. Modelo Geral
+
+Primeiro treinamos o detector em um dataset amplo:
 
 ```text
-workspace/bbox_clusters_v1/
-├── catalog.json
-├── embeddings.npy
-└── crops/
+data/roboflow/data.yaml
+        ↓
+det_general
+        ↓
+workspace/training_runs/det_general_yolo26n/weights/best.pt
 ```
 
-No projeto de boxes, `mask_path` começa vazio porque a segmentação ainda não foi gerada. A próxima etapa é usar a própria box como prompt para o SAM, em um ROI centrado no objeto, evitando cortar o cetáceo por tiles.
+Esse `best.pt` é o checkpoint raiz para todos os especialistas de detecção.
 
-## Matriz de treinamento YOLO26
-
-A configuração experimental está em:
+Para segmentação, depois que o dataset estiver pronto:
 
 ```text
-configs/training_experiments.yaml
+seg_general
 ```
 
-A primeira bateria usa YOLO26n e YOLO26n-seg:
+### 2. LoRAs especialistas
+
+Cada LoRA é um adapter independente. Todas partem do mesmo checkpoint geral, mas cada uma pode usar um dataset pequeno diferente:
 
 ```text
-Detection
-├── Base: backbone congelado
-├── LoRA
-└── Full fine-tune
-
-Segmentation
-├── Base: backbone congelado
-├── LoRA
-└── Full fine-tune
+det_general/best.pt
+    ├── det_lora_01 ← dataset pequeno 01
+    ├── det_lora_02 ← dataset pequeno 02
+    ├── det_lora_03 ← dataset pequeno 03
+    ├── det_lora_04 ← dataset pequeno 04
+    └── det_lora_05 ← dataset pequeno 05
 ```
 
-Antes de iniciar os experimentos longos:
+`det_lora_02` não continua de `det_lora_01`. Cada treinamento começa novamente no `best.pt` do Modelo Geral.
 
-```bash
-python scripts/train_experiments.py --group smoke_tests --only detect_yolo26n_smoke
-```
-
-Depois, para detecção:
-
-```bash
-python scripts/train_experiments.py --only detect_base detect_lora detect_full
-```
-
-Para LoRA, utilize o fork YOLO-Master:
-
-```bash
-python scripts/setup_yolo_master.py --dir /content/YOLO-Master
-```
-
-Os resultados de todos os experimentos são consolidados automaticamente em:
+O artefato principal é o adapter:
 
 ```text
-workspace/training_runs/experiment_summary.csv
-workspace/training_runs/experiment_summary.json
+workspace/training_runs/det_lora_01/lora_adapter/
 ```
 
-O relatório guarda hiperparâmetros, parâmetros totais/treináveis, parâmetros LoRA, hardware, pico de VRAM, tempo de treino, tamanho dos checkpoints, métricas e velocidade de avaliação.
+O treinamento não chama `merge_lora()`; preservamos o modelo geral e os adapters separados.
 
-Detalhes estão em `TRAINING.md`.
+### 3. Full Fine-Tune de controle
 
-## Arquitetura alvo do TCC
+Para medir se LoRA realmente economiza recursos sem perder desempenho, cada LoRA N pode ser comparada com um Full Fine-Tune N:
 
 ```text
-Bounding boxes revisadas no Roboflow
-              |
-              +--> DINOv2 --> HDBSCAN --> classificação/revisão de clusters
-              |
-              +--> treino YOLO26 detector
-              |         |
-              |         +--> procurar possíveis objetos não anotados
-              |         +--> inferência em tiles + fusão no sistema global
-              |
-              +--> SAM guiado pela box --> máscaras --> dataset de segmentação
-                        |
-                        +--> YOLO26-seg Base / LoRA / Full fine-tune
+mesmo checkpoint geral
++ mesmo dataset pequeno N
++ mesmos hiperparâmetros comuns
 ```
 
-Para auditoria de anotações, a ideia é treinar o detector em partições sem incluir a imagem que está sendo auditada (out-of-fold) e comparar as predições com as boxes humanas por IoU. Predições fortes sem correspondência viram candidatos para revisão humana, não rótulos automáticos definitivos.
+A diferença é apenas:
 
-## Imagens de vídeo e objetos quase pontuais
+```text
+LoRA N           → treina adapter de baixa dimensão
+Full Fine-Tune N → libera todos os pesos
+```
 
-Quando o animal ocupa apenas um ou poucos pixels, nenhuma segmentação consegue recuperar um contorno que não existe na resolução original. Nesses frames, detecção e consistência temporal podem ser mais confiáveis que uma máscara detalhada.
+Exemplos de IDs:
 
-Para vídeos, o plano é combinar detecção por frame com rastreamento/consistência temporal. Um candidato que aparece de forma coerente em quadros consecutivos merece prioridade maior na auditoria do que um único pixel branco isolado em um só frame.
+```text
+det_fullft_01 ... det_fullft_05
+seg_fullft_01 ... seg_fullft_05
+```
+
+## YOLO26n
+
+YOLO26n continua no projeto como escala inicial e smoke test para a Tesla T4. Depois de estabilizar o protocolo, o Modelo Geral pode ser repetido com uma escala maior se houver justificativa e VRAM suficiente.
 
 ## Google Colab
 
-Existe um único notebook principal:
+Existe um único notebook:
 
 ```text
 notebooks/TCC_Object_Discovery_Colab.ipynb
 ```
 
-Ele concentra preparação do ambiente, Google Drive, Roboflow, SAM, clustering, interface Streamlit e a matriz de treinamentos YOLO26. Antes dos treinamentos pesados, há uma etapa para encerrar Streamlit/ngrok e liberar a VRAM da mesma GPU.
+O notebook executa as etapas separadamente. Ele possui um helper `run_stage()` para rodar **uma etapa por vez**:
 
-O notebook utiliza:
+```python
+run_stage('smoke_det_yolo26n')
+run_stage('det_general')
+run_stage('det_lora_01')
+run_stage('det_fullft_01')
+```
+
+Os templates LoRA/Full FT ficam desativados no YAML versionado para evitar execução acidental. O notebook cria uma cópia de runtime e ativa apenas o ID escolhido.
+
+O Colab usa:
 
 ```text
 MyDrive/TCC_Code_Test_runtime/
@@ -256,23 +208,75 @@ MyDrive/TCC_Code_Test_runtime/
 └── weights/
 ```
 
-Use `requirements-colab.txt`, que evita reinstalar `torch`/`torchvision` sobre o runtime CUDA já fornecido pelo Colab.
-
-No **Colab > Secrets**, configure:
+Secrets:
 
 ```text
 GITHUB_TOKEN
 ROBOFLOW_API_KEY
-NGROK_AUTHTOKEN   # opcional, só para abrir o Streamlit
+NGROK_AUTHTOKEN   # opcional
 ```
 
-Instruções detalhadas estão em `COLAB.md`.
+Detalhes: `COLAB.md` e `TRAINING.md`.
+
+## Como a LoRA entra na inferência
+
+LoRA não é um modelo completo que recebe diretamente as boxes produzidas pelo Modelo Geral. O adapter modifica camadas internas do mesmo modelo-base. Para representar a ideia de um especialista posterior ao detector geral, vamos comparar:
+
+```text
+A) Modelo Geral + uma LoRA selecionada
+
+B) Modelo Geral
+       ↓
+   ROI candidato
+       ↓
+   Modelo Geral + LoRA especialista
+
+C) Modelo Geral
+       ↓
+   vários especialistas independentes
+       ↓
+   fusão espacial das detecções
+```
+
+A estratégia B é a implementação mais fiel da ideia de "primeiro o modelo geral, depois o vínculo especialista". O segundo estágio é uma nova inferência sobre o ROI usando o mesmo checkpoint geral com o adapter escolhido.
+
+O YOLO-Master também possui MoLoRA, mas isso é outro experimento: os especialistas são treinados dentro de uma arquitetura roteada. Não é equivalente a treinar cinco LoRAs independentes e simplesmente juntá-las depois.
+
+## Resultados do treinamento
+
+```text
+workspace/training_runs/experiment_summary.csv
+workspace/training_runs/experiment_summary.json
+```
+
+O relatório registra hiperparâmetros, checkpoint geral de origem, parâmetros totais e treináveis, parâmetros LoRA, tamanho do adapter, GPU, VRAM, tempo, métricas e velocidade.
+
+## Arquitetura alvo do TCC
+
+```text
+Bounding boxes revisadas no Roboflow
+              |
+              +--> DINOv2 --> HDBSCAN --> revisão humana
+              |
+              +--> Modelo Geral YOLO26
+              |        |
+              |        +--> auditoria de possíveis objetos não anotados
+              |        +--> inferência em tiles + fusão espacial
+              |        +--> LoRAs especialistas independentes
+              |
+              +--> SAM guiado pela box --> máscaras --> dataset de segmentação
+                       |
+                       +--> Modelo Geral YOLO26-seg
+                                 |
+                                 +--> LoRAs de segmentação independentes
+```
 
 ## Regras experimentais
 
-- Não misturar `train`, `valid` e `test` na criação do modelo final.
-- Se frames consecutivos vierem do mesmo vídeo, preferir divisão por vídeo ou por blocos temporais para reduzir vazamento entre treino e teste.
-- Manter o baseline SAM automático para comparação, mesmo que tenha desempenho ruim.
-- Medir cobertura, falsos candidatos, tempo computacional e esforço humano.
-- Aplicar augmentation apenas no conjunto de treinamento.
-- Na comparação Base × LoRA × Full, manter splits, seed, resolução, augmentation e protocolo comuns iguais; mudar apenas o regime de adaptação.
+- Não misturar `train`, `valid` e `test`.
+- Para vídeo, dividir preferencialmente por vídeo ou blocos temporais.
+- Manter o baseline SAM automático como comparação.
+- Aplicar augmentation somente no treino.
+- Não usar `test` para selecionar hiperparâmetros.
+- Comparar cada LoRA com um Full Fine-Tune usando o mesmo checkpoint geral e o mesmo dataset pequeno.
+- Não usar cluster semântico para fundir detecções de tiles; a fusão deve ser espacial no sistema global da imagem.
