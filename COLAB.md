@@ -1,13 +1,12 @@
 # Google Colab
 
-O projeto pode rodar no Google Colab usando dois notebooks:
+O projeto usa um único notebook principal no Google Colab:
 
 ```text
 notebooks/TCC_Object_Discovery_Colab.ipynb
-notebooks/TCC_YOLO26_Experiments_Colab.ipynb
 ```
 
-O primeiro prepara descoberta, clustering e interface. O segundo é dedicado à bateria controlada de treinamento YOLO26.
+Esse notebook concentra descoberta, clustering, interface Streamlit e a matriz controlada de treinamento YOLO26.
 
 ## Preparação
 
@@ -21,7 +20,7 @@ O primeiro prepara descoberta, clustering e interface. O segundo é dedicado à 
 
 ## Persistência
 
-Os notebooks montam o Google Drive e usam:
+O notebook monta o Google Drive e usa:
 
 ```text
 MyDrive/TCC_Code_Test_runtime/
@@ -37,7 +36,7 @@ Essas pastas são ligadas ao repositório clonado em `/content/TCC_Code_Test` po
 
 Use `requirements-colab.txt`. O Colab já fornece PyTorch/CUDA, portanto o arquivo não reinstala `torch` nem `torchvision`.
 
-A distribuição oficial `ultralytics` é instalada para YOLO26. Para os experimentos LoRA, o notebook de treinamento instala também o fork Tencent/YOLO-Master, que mantém a API Ultralytics e acrescenta suporte experimental a LoRA.
+A distribuição `ultralytics` é instalada para YOLO26. Para os experimentos LoRA, o notebook também instala o fork Tencent/YOLO-Master, que mantém a API Ultralytics e acrescenta suporte experimental a LoRA.
 
 ## Fluxo de descoberta recomendado
 
@@ -62,6 +61,8 @@ O projeto padrão é:
 ```text
 workspace/bbox_clusters_colab
 ```
+
+A interface Streamlit pode ser aberta pelo próprio notebook via ngrok para upload de imagem/vídeo, classificação de clusters e revisão.
 
 ## Matriz de treinamento
 
@@ -113,9 +114,9 @@ O relatório inclui hiperparâmetros, parâmetros totais e treináveis, percentu
 
 Detalhes metodológicos estão em `TRAINING.md`.
 
-## Interface Streamlit
+## Uso de uma única GPU
 
-A última célula do notebook de descoberta inicia `streamlit run app.py` e cria um túnel ngrok. Para isso, configure `NGROK_AUTHTOKEN` em Secrets. Não coloque tokens diretamente no notebook.
+O notebook foi unificado justamente para usar a mesma sessão e a mesma GPU. Antes de iniciar treinamentos longos, existe uma célula para encerrar Streamlit/ngrok e liberar a VRAM.
 
 ## Observação sobre sessões longas
 
