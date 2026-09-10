@@ -16,7 +16,7 @@ from tcc_discovery.core import (
     set_object_label,
 )
 
-APP_VERSION = "0.3-adaptive-tiling"
+APP_VERSION = "0.3.1-cluster-ui-fix"
 
 st.set_page_config(page_title="TCC - Object Discovery Lab", layout="wide")
 st.title("Object Discovery Lab")
@@ -175,12 +175,22 @@ elif page == "2. Classificar clusters":
     st.markdown("#### Amostra do cluster")
     max_thumbs = min(60, len(group))
     if max_thumbs > 0:
-        min_thumbs = min(4, max_thumbs)
-        show_n = st.slider("Quantidade de miniaturas", min_thumbs, max_thumbs, min(20, max_thumbs))
-        cols = st.columns(5)
+        # Streamlit não aceita slider com min_value == max_value. Para clusters
+        # pequenos, simplesmente mostramos todas as miniaturas sem criar slider.
+        if max_thumbs <= 4:
+            show_n = max_thumbs
+            st.caption(f"Mostrando todas as {show_n} miniaturas deste cluster.")
+        else:
+            show_n = st.slider(
+                "Quantidade de miniaturas",
+                min_value=4,
+                max_value=max_thumbs,
+                value=min(20, max_thumbs),
+            )
+        cols = st.columns(min(5, show_n))
         for i, obj in enumerate(group[:show_n]):
             crop = project_dir / obj["crop_path"]
-            with cols[i % 5]:
+            with cols[i % len(cols)]:
                 st.image(str(crop), caption=f"{obj['id']}\nlabel={obj.get('label')}", use_container_width=True)
 
     st.markdown("#### Revisão individual / exceção")
