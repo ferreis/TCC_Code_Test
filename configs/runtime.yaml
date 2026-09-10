@@ -62,6 +62,7 @@ profiles:
     use_local_dataset_cache: false
     local_data_root: workspace/local_training_data
     refresh_local_dataset_cache: false
+    yolo_master_dir: .yolo-master
 
   colab:
     # Perfil inicial para Tesla T4 ~15 GB.
@@ -71,6 +72,8 @@ profiles:
     use_local_dataset_cache: true
     local_data_root: /content/TCC_training_data
     refresh_local_dataset_cache: false
+    yolo_master_dir: /content/YOLO-Master
+    persist_root: /content/drive/MyDrive/TCC_Code_Test_runtime
 
 roboflow:
   workspace: rafael-fernando-dos-reis-mecabo
