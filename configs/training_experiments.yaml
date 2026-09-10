@@ -1,44 +1,18 @@
-# Plano de treinamento do TCC
+# Topologia dos experimentos do TCC.
 #
-# Hipótese experimental:
-#   1) treinar UM MODELO GERAL em um dataset amplo;
-#   2) congelar esse modelo geral e treinar adapters LoRA especialistas,
-#      cada um em seu próprio dataset pequeno;
-#   3) para comparação, treinar um Full Fine-Tune separado usando o MESMO
-#      checkpoint geral e o MESMO dataset pequeno de cada LoRA;
-#   4) os adapters LoRA permanecem separados e vinculados ao checkpoint geral.
+# Parâmetros de hardware, treino, LoRA, modelos e caminhos de datasets ficam em:
+#   configs/runtime.yaml
 #
-# Não treinamos todos os LoRAs juntos. Cada especialista é uma execução independente.
-# YOLO26n é mantido como escala inicial/teste para a Tesla T4.
+# Este arquivo define apenas a relação entre as etapas.
 
-global:
-  epochs: 100
-  imgsz: 640
-  batch: 16
-  device: 0
-  workers: 2
-  amp: true
-  optimizer: auto
-  patience: 30
-  seed: 42
-  deterministic: true
-  cache: false
-  close_mosaic: 10
-  save_period: 10
-  plots: true
-  verbose: true
-  project: workspace/training_runs
-  eval_split: test
+global: {}
 
-# ETAPA A — modelos gerais treinados em datasets amplos.
 general_models:
   det_general:
     enabled: true
     label: "Detecção — Modelo Geral (dataset amplo)"
     task: detect
     regime: general_model
-    model: yolo26n.pt
-    data: data/roboflow/data.yaml
     name: det_general_yolo26n
     train_args:
       freeze: 0
@@ -48,255 +22,47 @@ general_models:
     label: "Segmentação — Modelo Geral (dataset amplo)"
     task: segment
     regime: general_model
-    model: yolo26n-seg.pt
-    data: data/segmentation/data.yaml
     name: seg_general_yolo26n
     train_args:
       freeze: 0
 
-# ETAPA B — adapters LoRA independentes.
-# Todos partem do best.pt do modelo geral correspondente.
-# Ative apenas os especialistas cujo data.yaml já existir.
 lora_specialists:
-  det_lora_01:
-    enabled: false
-    label: "Detecção — LoRA Especialista 01"
-    task: detect
-    regime: lora_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_01/data.yaml
-    name: det_lora_01
-    train_args: &lora_detect_args
-      lora_r: 16
-      lora_alpha: 32
-      lora_dropout: 0.10
-      lora_gradient_checkpointing: true
-      lora_include_head: true
+  det_lora_01: {enabled: false, label: "Detecção — LoRA Especialista 01", task: detect, regime: lora_specialist, base_from: det_general, name: det_lora_01}
+  det_lora_02: {enabled: false, label: "Detecção — LoRA Especialista 02", task: detect, regime: lora_specialist, base_from: det_general, name: det_lora_02}
+  det_lora_03: {enabled: false, label: "Detecção — LoRA Especialista 03", task: detect, regime: lora_specialist, base_from: det_general, name: det_lora_03}
+  det_lora_04: {enabled: false, label: "Detecção — LoRA Especialista 04", task: detect, regime: lora_specialist, base_from: det_general, name: det_lora_04}
+  det_lora_05: {enabled: false, label: "Detecção — LoRA Especialista 05", task: detect, regime: lora_specialist, base_from: det_general, name: det_lora_05}
 
-  det_lora_02:
-    enabled: false
-    label: "Detecção — LoRA Especialista 02"
-    task: detect
-    regime: lora_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_02/data.yaml
-    name: det_lora_02
-    train_args: *lora_detect_args
+  seg_lora_01: {enabled: false, label: "Segmentação — LoRA Especialista 01", task: segment, regime: lora_specialist, base_from: seg_general, name: seg_lora_01}
+  seg_lora_02: {enabled: false, label: "Segmentação — LoRA Especialista 02", task: segment, regime: lora_specialist, base_from: seg_general, name: seg_lora_02}
+  seg_lora_03: {enabled: false, label: "Segmentação — LoRA Especialista 03", task: segment, regime: lora_specialist, base_from: seg_general, name: seg_lora_03}
+  seg_lora_04: {enabled: false, label: "Segmentação — LoRA Especialista 04", task: segment, regime: lora_specialist, base_from: seg_general, name: seg_lora_04}
+  seg_lora_05: {enabled: false, label: "Segmentação — LoRA Especialista 05", task: segment, regime: lora_specialist, base_from: seg_general, name: seg_lora_05}
 
-  det_lora_03:
-    enabled: false
-    label: "Detecção — LoRA Especialista 03"
-    task: detect
-    regime: lora_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_03/data.yaml
-    name: det_lora_03
-    train_args: *lora_detect_args
-
-  det_lora_04:
-    enabled: false
-    label: "Detecção — LoRA Especialista 04"
-    task: detect
-    regime: lora_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_04/data.yaml
-    name: det_lora_04
-    train_args: *lora_detect_args
-
-  det_lora_05:
-    enabled: false
-    label: "Detecção — LoRA Especialista 05"
-    task: detect
-    regime: lora_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_05/data.yaml
-    name: det_lora_05
-    train_args: *lora_detect_args
-
-  seg_lora_01:
-    enabled: false
-    label: "Segmentação — LoRA Especialista 01"
-    task: segment
-    regime: lora_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_01/data.yaml
-    name: seg_lora_01
-    train_args: &lora_segment_args
-      lora_r: 16
-      lora_alpha: 32
-      lora_dropout: 0.10
-      lora_gradient_checkpointing: true
-      lora_include_head: true
-
-  seg_lora_02:
-    enabled: false
-    label: "Segmentação — LoRA Especialista 02"
-    task: segment
-    regime: lora_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_02/data.yaml
-    name: seg_lora_02
-    train_args: *lora_segment_args
-
-  seg_lora_03:
-    enabled: false
-    label: "Segmentação — LoRA Especialista 03"
-    task: segment
-    regime: lora_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_03/data.yaml
-    name: seg_lora_03
-    train_args: *lora_segment_args
-
-  seg_lora_04:
-    enabled: false
-    label: "Segmentação — LoRA Especialista 04"
-    task: segment
-    regime: lora_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_04/data.yaml
-    name: seg_lora_04
-    train_args: *lora_segment_args
-
-  seg_lora_05:
-    enabled: false
-    label: "Segmentação — LoRA Especialista 05"
-    task: segment
-    regime: lora_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_05/data.yaml
-    name: seg_lora_05
-    train_args: *lora_segment_args
-
-# ETAPA C — controles Full Fine-Tune.
-# Cada controle usa o mesmo checkpoint geral + o mesmo dataset pequeno da LoRA
-# de mesmo número; a diferença é liberar todos os pesos em vez de treinar adapter.
 full_finetune_controls:
-  det_fullft_01:
-    enabled: false
-    label: "Detecção — Full Fine-Tune Controle 01"
-    task: detect
-    regime: full_finetune_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_01/data.yaml
-    name: det_fullft_01
-    train_args: &fullft_args
-      freeze: 0
+  det_fullft_01: {enabled: false, label: "Detecção — Full Fine-Tune Controle 01", task: detect, regime: full_finetune_specialist, base_from: det_general, name: det_fullft_01, train_args: {freeze: 0}}
+  det_fullft_02: {enabled: false, label: "Detecção — Full Fine-Tune Controle 02", task: detect, regime: full_finetune_specialist, base_from: det_general, name: det_fullft_02, train_args: {freeze: 0}}
+  det_fullft_03: {enabled: false, label: "Detecção — Full Fine-Tune Controle 03", task: detect, regime: full_finetune_specialist, base_from: det_general, name: det_fullft_03, train_args: {freeze: 0}}
+  det_fullft_04: {enabled: false, label: "Detecção — Full Fine-Tune Controle 04", task: detect, regime: full_finetune_specialist, base_from: det_general, name: det_fullft_04, train_args: {freeze: 0}}
+  det_fullft_05: {enabled: false, label: "Detecção — Full Fine-Tune Controle 05", task: detect, regime: full_finetune_specialist, base_from: det_general, name: det_fullft_05, train_args: {freeze: 0}}
 
-  det_fullft_02:
-    enabled: false
-    label: "Detecção — Full Fine-Tune Controle 02"
-    task: detect
-    regime: full_finetune_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_02/data.yaml
-    name: det_fullft_02
-    train_args: *fullft_args
+  seg_fullft_01: {enabled: false, label: "Segmentação — Full Fine-Tune Controle 01", task: segment, regime: full_finetune_specialist, base_from: seg_general, name: seg_fullft_01, train_args: {freeze: 0}}
+  seg_fullft_02: {enabled: false, label: "Segmentação — Full Fine-Tune Controle 02", task: segment, regime: full_finetune_specialist, base_from: seg_general, name: seg_fullft_02, train_args: {freeze: 0}}
+  seg_fullft_03: {enabled: false, label: "Segmentação — Full Fine-Tune Controle 03", task: segment, regime: full_finetune_specialist, base_from: seg_general, name: seg_fullft_03, train_args: {freeze: 0}}
+  seg_fullft_04: {enabled: false, label: "Segmentação — Full Fine-Tune Controle 04", task: segment, regime: full_finetune_specialist, base_from: seg_general, name: seg_fullft_04, train_args: {freeze: 0}}
+  seg_fullft_05: {enabled: false, label: "Segmentação — Full Fine-Tune Controle 05", task: segment, regime: full_finetune_specialist, base_from: seg_general, name: seg_fullft_05, train_args: {freeze: 0}}
 
-  det_fullft_03:
-    enabled: false
-    label: "Detecção — Full Fine-Tune Controle 03"
-    task: detect
-    regime: full_finetune_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_03/data.yaml
-    name: det_fullft_03
-    train_args: *fullft_args
-
-  det_fullft_04:
-    enabled: false
-    label: "Detecção — Full Fine-Tune Controle 04"
-    task: detect
-    regime: full_finetune_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_04/data.yaml
-    name: det_fullft_04
-    train_args: *fullft_args
-
-  det_fullft_05:
-    enabled: false
-    label: "Detecção — Full Fine-Tune Controle 05"
-    task: detect
-    regime: full_finetune_specialist
-    base_from: det_general
-    data: data/specialists/detection/lora_05/data.yaml
-    name: det_fullft_05
-    train_args: *fullft_args
-
-  seg_fullft_01:
-    enabled: false
-    label: "Segmentação — Full Fine-Tune Controle 01"
-    task: segment
-    regime: full_finetune_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_01/data.yaml
-    name: seg_fullft_01
-    train_args: *fullft_args
-
-  seg_fullft_02:
-    enabled: false
-    label: "Segmentação — Full Fine-Tune Controle 02"
-    task: segment
-    regime: full_finetune_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_02/data.yaml
-    name: seg_fullft_02
-    train_args: *fullft_args
-
-  seg_fullft_03:
-    enabled: false
-    label: "Segmentação — Full Fine-Tune Controle 03"
-    task: segment
-    regime: full_finetune_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_03/data.yaml
-    name: seg_fullft_03
-    train_args: *fullft_args
-
-  seg_fullft_04:
-    enabled: false
-    label: "Segmentação — Full Fine-Tune Controle 04"
-    task: segment
-    regime: full_finetune_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_04/data.yaml
-    name: seg_fullft_04
-    train_args: *fullft_args
-
-  seg_fullft_05:
-    enabled: false
-    label: "Segmentação — Full Fine-Tune Controle 05"
-    task: segment
-    regime: full_finetune_specialist
-    base_from: seg_general
-    data: data/specialists/segmentation/lora_05/data.yaml
-    name: seg_fullft_05
-    train_args: *fullft_args
-
-# Apenas valida ambiente/caminhos/VRAM. Não faz parte da comparação final.
 smoke_tests:
   smoke_det_yolo26n:
     enabled: true
     label: "Smoke Test — YOLO26n Detecção"
     task: detect
     regime: smoke
-    model: yolo26n.pt
-    data: data/roboflow/data.yaml
     name: smoke_det_yolo26n
-    train_args:
-      epochs: 3
-      batch: 8
-      imgsz: 640
 
   smoke_seg_yolo26n:
     enabled: false
     label: "Smoke Test — YOLO26n Segmentação"
     task: segment
     regime: smoke
-    model: yolo26n-seg.pt
-    data: data/segmentation/data.yaml
     name: smoke_seg_yolo26n
-    train_args:
-      epochs: 3
-      batch: 8
-      imgsz: 640
