@@ -1,19 +1,43 @@
 # Protocolo de treinamento YOLO26
 
-O treinamento foi reorganizado para refletir a hipótese real do TCC: **um modelo geral treinado em dataset amplo + múltiplos adapters LoRA especialistas treinados separadamente em datasets pequenos**.
+O projeto usa **um Modelo Geral treinado em dataset amplo + múltiplos adapters LoRA especialistas treinados separadamente em datasets pequenos**, com controles Full Fine-Tune equivalentes.
+
+## Fonte única de configuração
+
+Os parâmetros editáveis ficam em:
+
+```text
+configs/runtime.yaml
+```
+
+Esse arquivo é compartilhado por três entradas:
+
+```text
+Google Colab ─┐
+Streamlit ────┼──> scripts/train_experiments.py
+Terminal ─────┘              ↓
+                    tcc_discovery/training_experiments.py
+```
+
+`configs/training_experiments.yaml` não é mais a fonte dos hiperparâmetros. Ele define apenas a topologia das etapas: IDs, regimes, relações `base_from` e nomes de execução.
+
+O runtime possui dois perfis iniciais:
+
+```text
+local  → perfil conservador para GPU ~6 GB
+colab  → perfil para Tesla T4 ~15 GB + staging do dataset em /content
+```
+
+Batch, workers, cache e staging podem diferir por perfil; epochs, resolução, seed, LoRA e demais parâmetros científicos permanecem centralizados no mesmo arquivo.
 
 ## Terminologia
 
-Não usamos mais `Base`, `Base + LoRA` e `Full` como três treinamentos paralelos sobre o mesmo dataset amplo.
-
 | Nome | Definição |
 |---|---|
-| **Modelo Geral** | modelo YOLO26 treinado no dataset amplo; produz o checkpoint raiz `best.pt` |
-| **LoRA Especialista N** | adapter pequeno treinado separadamente sobre o checkpoint do Modelo Geral, usando um dataset pequeno N |
-| **Full Fine-Tune Controle N** | cópia do mesmo checkpoint geral com todos os pesos liberados, treinada no mesmo dataset pequeno N da LoRA N |
-| **Smoke Test YOLO26n** | teste curto de ambiente; não entra na comparação científica final |
-
-## Relação entre o modelo geral e as LoRAs
+| **Modelo Geral** | YOLO26 treinado no dataset amplo; produz o `best.pt` raiz |
+| **LoRA Especialista N** | adapter treinado separadamente sobre o checkpoint do Modelo Geral usando dataset pequeno N |
+| **Full Fine-Tune Controle N** | cópia do mesmo checkpoint geral com todos os pesos liberados no mesmo dataset pequeno N |
+| **Smoke Test YOLO26n** | teste curto de ambiente; não entra na comparação final |
 
 ```text
 Dataset amplo
@@ -28,40 +52,14 @@ best.pt
     └── LoRA 05 ← dataset pequeno 05
 ```
 
-Cada LoRA é treinada **independentemente**. O treinamento de `LoRA 02` não continua a partir de `LoRA 01`; ambas partem do mesmo `best.pt` do Modelo Geral.
+Cada LoRA é independente. `LoRA 02` não continua de `LoRA 01`.
 
-No YOLO-Master, o adapter é salvo separadamente por `save_lora_only()`. O projeto não executa `merge_lora()` durante o protocolo de treinamento, porque queremos preservar a modularidade e medir o custo de cada adapter.
-
-## Comparação com Full Fine-Tune
-
-Para avaliar se a LoRA compensa, o controle correto é:
+## IDs
 
 ```text
-mesmo Modelo Geral
-+ mesmo dataset pequeno N
-+ mesmos hiperparâmetros comuns
-```
+smoke_det_yolo26n
+smoke_seg_yolo26n
 
-A única diferença deliberada deve ser:
-
-```text
-LoRA N              → pesos-base preservados + adapter treinável
-Full Fine-Tune N    → todos os pesos do modelo liberados
-```
-
-Assim podemos comparar qualidade, tempo, VRAM, parâmetros treináveis e tamanho do artefato.
-
-## Configuração
-
-O plano está em:
-
-```text
-configs/training_experiments.yaml
-```
-
-Os IDs principais são:
-
-```text
 det_general
 seg_general
 
@@ -70,114 +68,137 @@ seg_lora_01 ... seg_lora_05
 
 det_fullft_01 ... det_fullft_05
 seg_fullft_01 ... seg_fullft_05
-
-smoke_det_yolo26n
-smoke_seg_yolo26n
 ```
 
-Os templates especialistas ficam `enabled: false` no arquivo versionado para evitar execução acidental em lote. O notebook cria uma cópia de runtime e ativa somente a etapa escolhida.
+Quando `--only` é usado, o runtime ativa explicitamente apenas a etapa selecionada, mesmo que o template esteja `enabled: false` para impedir disparos acidentais em lote.
 
-## Ordem de treinamento
+## Treinamento pelo terminal
 
-### Detecção
+Local:
+
+```bash
+python scripts/train_experiments.py --profile local --only smoke_det_yolo26n
+python scripts/train_experiments.py --profile local --only det_general
+python scripts/train_experiments.py --profile local --only det_lora_01
+python scripts/train_experiments.py --profile local --only det_fullft_01
+```
+
+Colab usa os mesmos comandos com:
 
 ```text
-1. smoke_det_yolo26n
-2. det_general
-3. det_lora_01
-4. det_fullft_01
-5. det_lora_02
-6. det_fullft_02
-...
+--profile colab
 ```
 
-Não é obrigatório treinar cinco LoRAs; `01..05` são slots para experimentos especialistas.
+Listar sem treinar:
 
-### Segmentação
-
-A mesma lógica é usada depois que `data/segmentation/data.yaml` existir:
-
-```text
-seg_general
-    ↓
-seg_lora_01 ... seg_lora_05
-    ↓
-seg_fullft_01 ... seg_fullft_05
+```bash
+python scripts/train_experiments.py --profile local --group all --list
 ```
 
-## YOLO26n
+Dry-run:
 
-YOLO26n é usado inicialmente porque permite validar o protocolo na Tesla T4 com menor custo. Isso não significa que o Modelo Geral final precise permanecer `n`; depois de estabilizar o pipeline podemos repetir o Modelo Geral com `s` ou `m`, mantendo a mesma metodologia.
+```bash
+python scripts/train_experiments.py --profile local --only det_general --dry-run
+```
+
+Retomar:
+
+```bash
+python scripts/train_experiments.py --profile local --only det_general --resume
+```
+
+## Frontend de treinamento
+
+Execute:
+
+```bash
+streamlit run app.py
+```
+
+O diretório `pages/` adiciona a página **Treinamento** ao Streamlit. Ela permite selecionar perfil e etapa, editar/salvar `configs/runtime.yaml`, visualizar GPU/VRAM/GPU-Util, iniciar o treinamento em processo separado, acompanhar o log, atualizar o status, parar a execução e consultar os resultados já registrados.
+
+Para uma etapa LoRA, a página verifica `ultralytics.utils.lora`. Se necessário, pode executar `scripts/setup_yolo_master.py` no mesmo ambiente virtual. O treinamento em si continua sendo feito pela mesma CLI; o frontend não possui uma segunda implementação do algoritmo.
 
 ## LoRA
 
-O backend é o **Tencent/YOLO-Master**, que expõe `save_lora_only()`, `load_lora()` e `merge_lora()`.
+O backend é Tencent/YOLO-Master. O adapter é salvo separadamente com `save_lora_only()` e, na avaliação, é recarregado sobre o mesmo checkpoint geral.
 
-Configuração inicial dos adapters:
+Valores iniciais estão em `configs/runtime.yaml`:
 
 ```text
-rank (r): 16
+rank: 16
 alpha: 32
 dropout: 0.10
 gradient checkpointing: ligado
 include head: ligado
 ```
 
-Esses valores são ponto de partida e devem ser registrados em cada execução.
+O projeto não faz `merge_lora()` durante o protocolo principal.
+
+## Comparação LoRA × Full Fine-Tune
+
+Para o especialista N:
+
+```text
+mesmo checkpoint geral
++ mesmo dataset pequeno N
++ mesmos hiperparâmetros científicos
+```
+
+Muda apenas o regime:
+
+```text
+LoRA N           → pesos-base preservados + adapter treinável
+Full Fine-Tune N → todos os pesos treináveis
+```
+
+Medimos qualidade, tempo, VRAM, parâmetros treináveis, tamanho do artefato e velocidade.
+
+## Datasets e staging
+
+Os caminhos de todos os `data.yaml` ficam em `configs/runtime.yaml`.
+
+No perfil `colab`, `use_local_dataset_cache: true` faz a CLI copiar apenas o dataset da etapa atual para SSD local em `/content/TCC_training_data` antes do treino. Os checkpoints/resultados continuam no diretório persistido ligado ao Google Drive.
+
+No perfil `local`, o staging começa desativado porque o dataset já está em disco local.
 
 ## Artefatos
 
+```text
 Modelo Geral:
-
-```text
 workspace/training_runs/det_general_yolo26n/weights/best.pt
-```
 
-Exemplo de LoRA:
-
-```text
+LoRA:
 workspace/training_runs/det_lora_01/lora_adapter/
-```
 
-Exemplo de Full Fine-Tune:
-
-```text
+Full Fine-Tune:
 workspace/training_runs/det_fullft_01/weights/best.pt
 ```
 
-Para LoRA, o artefato principal registrado é o adapter. A validação final do experimento LoRA recarrega explicitamente:
-
-```text
-Modelo Geral best.pt + lora_adapter/
-```
-
-em vez de depender de um checkpoint fundido.
-
-## Estratégias de inferência a testar depois
-
-A LoRA não é um detector completo que recebe diretamente a saída do Modelo Geral. Ela modifica internamente camadas do mesmo modelo-base. Para reproduzir a ideia de especialização em duas etapas, testaremos três arquiteturas:
-
-```text
-A) Geral + adapter selecionado
-B) Geral → ROI candidato → Geral + LoRA especialista
-C) Geral → vários especialistas → fusão espacial das detecções
-```
-
-A estratégia B é a que mais se aproxima da ideia de "passar primeiro pelo modelo geral e depois pelo vínculo especialista". O segundo estágio executa novamente o modelo-base com o adapter carregado sobre a região candidata.
-
-Treinar várias LoRAs separadas e simplesmente somá-las depois não é equivalente a esse fluxo. O YOLO-Master também oferece MoLoRA, mas MoLoRA é outro método, com especialistas treinados dentro de uma arquitetura roteada; não deve ser confundido com cinco adapters independentes deste experimento.
-
-## Métricas registradas
-
-Cada etapa atualiza:
+Cada execução atualiza:
 
 ```text
 workspace/training_runs/experiment_summary.csv
 workspace/training_runs/experiment_summary.json
 ```
 
-São registrados, quando disponíveis: hiperparâmetros, modelo-base de origem, parâmetros totais e treináveis, parâmetros LoRA, tempo de treino, GPU, pico de VRAM, tamanho de `best.pt`, tamanho do adapter LoRA, métricas de box/máscara, velocidade de inferência, versões do ambiente e commit do projeto.
+Após um treino real, `scripts/train_experiments.py` também atualiza automaticamente:
+
+```text
+exports/TCC_Analise_models/
+exports/TCC_Analise_models.zip
+```
+
+## Estratégias de inferência posteriores
+
+```text
+A) Modelo Geral + adapter selecionado
+B) Modelo Geral → ROI candidato → Modelo Geral + LoRA especialista
+C) Modelo Geral → vários especialistas → fusão espacial das detecções
+```
+
+A estratégia B representa melhor a hipótese de primeiro localizar com conhecimento geral e depois reavaliar a região com um especialista.
 
 ## Regra de avaliação
 
-Não usar `test` para selecionar hiperparâmetros. Para vídeos, dividir treino/validação/teste por vídeo ou por blocos temporais, evitando frames quase idênticos em conjuntos diferentes.
+Não usar `test` para selecionar hiperparâmetros. Para vídeos, separar treino/validação/teste por vídeo ou blocos temporais para evitar vazamento por frames quase idênticos.
