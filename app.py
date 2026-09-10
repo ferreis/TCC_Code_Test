@@ -16,7 +16,7 @@ from tcc_discovery.core import (
     set_object_label,
 )
 
-APP_VERSION = "0.3.1-cluster-ui-fix"
+APP_VERSION = "0.3.2-ignore-ui"
 
 st.set_page_config(page_title="TCC - Object Discovery Lab", layout="wide")
 st.title("Object Discovery Lab")
@@ -144,39 +144,80 @@ elif page == "2. Classificar clusters":
     if not (project_dir / "catalog.json").exists():
         st.warning("Execute a descoberta primeiro.")
         st.stop()
+
     catalog = load_project(project_dir)
     objects = catalog["objects"]
     if not objects:
         st.warning("Nenhum objeto encontrado.")
         st.stop()
-    counts = Counter(int(o.get("cluster", -1)) for o in objects)
+
+    active_objects = [o for o in objects if not o.get("ignored")]
+    ignored_objects = [o for o in objects if o.get("ignored")]
+    total_clusters = len({int(o.get("cluster", -1)) for o in objects})
+    ignored_clusters = len({int(o.get("cluster", -1)) for o in ignored_objects}) if ignored_objects else 0
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Objetos ativos", len(active_objects))
+    m2.metric("Objetos ignorados", len(ignored_objects))
+    m3.metric("Clusters no projeto", total_clusters)
+
+    show_ignored = st.checkbox(
+        "Mostrar itens ignorados",
+        value=False,
+        help="Normalmente os itens ignorados ficam fora da fila de revisão e também não são exportados para YOLO.",
+    )
+
+    review_objects = ignored_objects if show_ignored else active_objects
+    if not review_objects:
+        if show_ignored:
+            st.info("Nenhum objeto ignorado.")
+        else:
+            st.success("Não há objetos ativos restantes para revisar.")
+        st.stop()
+
+    counts = Counter(int(o.get("cluster", -1)) for o in review_objects)
     clusters = sorted(counts, key=lambda x: (x == -1, x))
     cluster = st.selectbox(
         "Cluster",
         clusters,
-        format_func=lambda x: f"Cluster {x} — {counts[x]} objetos" + (" (outliers)" if x == -1 else ""),
+        format_func=lambda x: (
+            f"Cluster {x} — {counts[x]} objetos"
+            + (" (outliers)" if x == -1 else "")
+            + (" (IGNORADO)" if show_ignored else "")
+        ),
     )
-    group = [o for o in objects if int(o.get("cluster", -1)) == int(cluster)]
+    group = [o for o in review_objects if int(o.get("cluster", -1)) == int(cluster)]
+
     existing_labels = Counter(o.get("label") for o in group if o.get("label"))
     if existing_labels:
         st.write("Rótulos atuais:", dict(existing_labels))
 
-    label = st.text_input("Nome da classe", value=next(iter(existing_labels), ""))
-    b1, b2 = st.columns(2)
-    if b1.button("Aplicar classe ao cluster", type="primary"):
-        n = set_cluster_label(project_dir, cluster, label, ignored=False)
-        st.success(f"Classe aplicada a {n} objetos.")
-        st.rerun()
-    if b2.button("Ignorar cluster"):
-        n = set_cluster_label(project_dir, cluster, None, ignored=True)
-        st.success(f"{n} objetos marcados como ignorados.")
-        st.rerun()
+    if show_ignored:
+        st.warning(
+            "Este modo mostra apenas objetos marcados como ignorados. Eles ficam fora da fila normal e não entram na exportação YOLO."
+        )
+        if st.button("Restaurar cluster para revisão", type="primary"):
+            n = set_cluster_label(project_dir, cluster, None, ignored=False)
+            st.success(f"{n} objetos restaurados para a fila de revisão.")
+            st.rerun()
+    else:
+        label = st.text_input("Nome da classe", value=next(iter(existing_labels), ""))
+        b1, b2 = st.columns(2)
+        if b1.button("Aplicar classe ao cluster", type="primary"):
+            if not label.strip():
+                st.warning("Informe um nome de classe antes de aplicar ao cluster.")
+            else:
+                n = set_cluster_label(project_dir, cluster, label, ignored=False)
+                st.success(f"Classe aplicada a {n} objetos.")
+                st.rerun()
+        if b2.button("Ignorar cluster"):
+            n = set_cluster_label(project_dir, cluster, None, ignored=True)
+            st.success(f"{n} objetos ignorados. O cluster foi removido da fila ativa.")
+            st.rerun()
 
     st.markdown("#### Amostra do cluster")
     max_thumbs = min(60, len(group))
     if max_thumbs > 0:
-        # Streamlit não aceita slider com min_value == max_value. Para clusters
-        # pequenos, simplesmente mostramos todas as miniaturas sem criar slider.
         if max_thumbs <= 4:
             show_n = max_thumbs
             st.caption(f"Mostrando todas as {show_n} miniaturas deste cluster.")
@@ -199,14 +240,27 @@ elif page == "2. Classificar clusters":
     st.image(render_object_overlay(project_dir, obj), caption=obj_id, use_container_width=True)
     individual_label = st.text_input("Classe individual", value=obj.get("label") or "", key=f"individual_{obj_id}")
     c1, c2 = st.columns(2)
-    if c1.button("Salvar classe individual"):
-        set_object_label(project_dir, obj_id, individual_label, ignored=False)
-        st.success("Objeto atualizado.")
-        st.rerun()
-    if c2.button("Ignorar objeto"):
-        set_object_label(project_dir, obj_id, None, ignored=True)
-        st.success("Objeto ignorado.")
-        st.rerun()
+
+    if show_ignored:
+        if c1.button("Restaurar objeto"):
+            set_object_label(project_dir, obj_id, None, ignored=False)
+            st.success("Objeto restaurado para a fila de revisão.")
+            st.rerun()
+    else:
+        if c1.button("Salvar classe individual"):
+            if not individual_label.strip():
+                st.warning("Informe uma classe individual antes de salvar.")
+            else:
+                set_object_label(project_dir, obj_id, individual_label, ignored=False)
+                st.success("Objeto atualizado.")
+                st.rerun()
+        if c2.button("Ignorar objeto"):
+            set_object_label(project_dir, obj_id, None, ignored=True)
+            st.success("Objeto ignorado e removido da fila ativa.")
+            st.rerun()
+
+    if ignored_clusters and not show_ignored:
+        st.caption(f"Há {ignored_clusters} cluster(s) com objetos ignorados. Ative 'Mostrar itens ignorados' para revisá-los.")
 
 elif page == "3. Exportar YOLO":
     st.subheader("Exportação")
