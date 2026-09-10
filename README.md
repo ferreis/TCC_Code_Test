@@ -1,150 +1,140 @@
 # TCC Code Test — Object Discovery Lab
 
-Protótipo para **descobrir objetos sem classes pré-definidas**, agrupar objetos visualmente semelhantes e permitir que uma pessoa nomeie os grupos depois.
+Protótipo para descoberta, agrupamento e revisão de objetos em imagens aéreas de cetáceos.
 
-O pipeline gera ao mesmo tempo:
+O projeto agora possui **dois fluxos complementares**:
 
-- **bounding box** de cada proposta;
-- **máscara de segmentação**;
-- crop do objeto;
-- **embedding DINOv2**;
-- **cluster HDBSCAN**;
-- interface Streamlit para nomear clusters ou corrigir objetos individuais;
-- exportação em **YOLO detection** e **YOLO segmentation**;
-- data augmentation preservando as máscaras.
+1. **Baseline totalmente automático:** imagem → SAM → propostas/máscaras → DINOv2 → HDBSCAN.
+2. **Fluxo recomendado para o dataset já anotado:** bounding boxes Roboflow → crops completos → DINOv2 → HDBSCAN → revisão humana → SAM guiado pela box (próxima etapa) → segmentação.
 
-## Como funciona
+A segunda abordagem evita que um cetáceo já anotado seja cortado em partes apenas porque atravessa a borda de um tile.
 
-```text
-Imagens (Roboflow ou pasta local)
-        |
-        v
-SAM - Segment Anything
-  |             |
-  |             +--> máscara de segmentação
-  +----------------> bounding box
-        |
-        v
-Crop de cada proposta
-        |
-        v
-DINOv2 -> embedding visual
-        |
-        v
-HDBSCAN -> clusters sem classe
-        |
-        v
-Revisão humana
-"cluster 3 = baleia", "cluster 8 = barco", ...
-        |
-        +--> YOLO bounding boxes
-        +--> YOLO segmentation
-        +--> dataset aumentado
-```
-
-**Importante:** o SAM propõe regiões/objetos, mas não sabe que uma região é "baleia", "barco" ou "espuma". O objetivo deste projeto é justamente descobrir e agrupar primeiro e classificar depois.
-
-## 1. Instalação
-
-Python 3.10+ é recomendado.
-
-### Linux/macOS
+## Instalação
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Windows PowerShell
+## Dataset Roboflow
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-Se houver GPU NVIDIA, instale a versão do PyTorch adequada à sua versão de CUDA antes de executar o `requirements.txt`.
-
-## 2. Baixar o SAM
-
-O modelo padrão é o `vit_b`, por ser menor e adequado para prototipagem:
-
-```bash
-python scripts/download_sam.py
-```
-
-Isso cria:
-
-```text
-weights/sam_vit_b_01ec64.pth
-```
-
-Também é possível testar `--model vit_l` ou `--model vit_h`, exigindo mais VRAM/RAM.
-
-O DINOv2 (`facebook/dinov2-small`) é baixado automaticamente pelo Transformers na primeira execução.
-
-## 3. Dataset do Roboflow
-
-Copie o exemplo:
+Crie `.env` a partir do exemplo:
 
 ```bash
 cp .env.example .env
-```
-
-No Windows:
-
-```powershell
-Copy-Item .env.example .env
 ```
 
 Preencha:
 
 ```env
 ROBOFLOW_API_KEY=...
-ROBOFLOW_WORKSPACE=...
-ROBOFLOW_PROJECT=...
+ROBOFLOW_WORKSPACE=rafael-fernando-dos-reis-mecabo
+ROBOFLOW_PROJECT=detecao-de-cetaceos-afrzs-iqey9
 ROBOFLOW_VERSION=1
 ```
 
-Depois:
+Baixe no formato YOLO26:
 
 ```bash
-python scripts/download_roboflow.py --format yolov8 --output data/roboflow
+python scripts/download_roboflow.py --format yolo26 --output data/roboflow --overwrite
 ```
 
-Para este protótipo, as anotações já existentes no Roboflow não são obrigatórias: o pipeline procura recursivamente pelas imagens dentro da pasta informada.
-
-## 4. Executar a interface
-
-```bash
-streamlit run app.py
-```
-
-Fluxo da interface:
-
-1. **Descobrir objetos** — SAM cria máscaras e bounding boxes; DINOv2 cria embeddings; HDBSCAN agrupa.
-2. **Classificar clusters** — veja crops semelhantes e dê um nome ao cluster. É possível corrigir um objeto individual.
-3. **Exportar YOLO** — gera detection e segmentation simultaneamente.
-4. **Aumentar dataset** — cria novas imagens e transforma as máscaras junto com a imagem.
-
-## Imagens aéreas e objetos pequenos
-
-Em imagens de drone, um animal pode ocupar uma fração muito pequena da imagem. Nesse caso, habilite `Tile para objetos pequenos` na tela de descoberta.
-
-Comece com:
+Estrutura esperada:
 
 ```text
-Tile: 1024 ou 1536
-SAM points_per_side: 32
-Área mínima: 120 px
+data/roboflow/
+├── train/
+│   ├── images/
+│   └── labels/
+├── valid/
+│   ├── images/
+│   └── labels/
+├── test/
+│   ├── images/
+│   └── labels/
+└── data.yaml
 ```
 
-Se houver muitos falsos objetos, aumente `Área mínima` ou reduza `Máx. objetos/imagem`. Se animais pequenos estiverem sendo perdidos, aumente `points_per_side` e/ou use tiles menores.
+## SAM
 
-## Saída do projeto
+O protótipo usa SAM ViT-B:
+
+```bash
+python scripts/download_sam.py
+```
+
+Checkpoint padrão:
+
+```text
+weights/sam_vit_b_01ec64.pth
+```
+
+## Interface
+
+```bash
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True streamlit run app.py
+```
+
+### 1. Descobrir com SAM
+
+Baseline sem usar as anotações existentes. Para imagens grandes, o sistema usa tiles adaptativos e devolve as coordenadas para o sistema da imagem original.
+
+Esse fluxo é útil como experimento, mas um objeto que atravesse exatamente uma borda de tile ainda pode aparecer em fragmentos. Por isso ele não é o fluxo principal para as bounding boxes já revisadas.
+
+### 2. Clusterizar bounding boxes
+
+Fluxo recomendado para o dataset atual.
+
+Use um projeto separado, por exemplo:
+
+```text
+workspace/bbox_clusters_v1
+```
+
+Pasta do split:
+
+```text
+data/roboflow/train
+```
+
+Cada anotação YOLO é convertida de coordenadas normalizadas para pixels, o cetáceo é recortado inteiro com contexto ao redor e o crop é enviado ao DINOv2. O HDBSCAN agrupa os embeddings visualmente semelhantes.
+
+Configuração inicial recomendada:
+
+```text
+Contexto ao redor da box: 1.8
+Crop mínimo: 64 px
+Mínimo por cluster: 6
+Batch DINOv2: 4
+Fallback CPU: ligado
+```
+
+Para objetos de poucos pixels, o crop mínimo evita enviar ao encoder uma região extremamente pequena. Isso não cria detalhe inexistente na imagem, apenas preserva um contexto controlado para o embedding.
+
+### 3. Classificar pendentes
+
+A fila mostra apenas objetos ainda sem decisão.
+
+Ao aplicar uma classe ao grupo, ele sai da fila de pendentes. Ao ignorar, ele vai para a fila de ignorados.
+
+### 4. Revisar classificados
+
+Mostra objetos e clusters que já receberam classe. É possível:
+
+- alterar a classe do grupo;
+- reabrir o grupo como pendente;
+- mudar apenas um objeto;
+- marcar um falso positivo como ignorado.
+
+### 5. Revisar ignorados
+
+Permite restaurar um grupo ou objeto descartado sem apagar informação do `catalog.json`.
+
+## Estado do projeto
+
+Projeto SAM:
 
 ```text
 workspace/discovery/
@@ -154,57 +144,44 @@ workspace/discovery/
 └── masks/
 ```
 
-A máscara é salva apenas dentro do bounding box para evitar armazenar uma imagem binária de resolução completa para cada objeto.
-
-## Exportação YOLO
+Projeto de bounding boxes:
 
 ```text
-exports/yolo/
-├── images/
-├── labels_detection/      # class cx cy w h
-├── labels_segmentation/   # class x1 y1 x2 y2 ...
-├── classes.txt
-└── data.yaml
+workspace/bbox_clusters_v1/
+├── catalog.json
+├── embeddings.npy
+└── crops/
 ```
 
-A exportação usa somente objetos que receberam uma classe e que não foram marcados como ignorados.
+No projeto de boxes, `mask_path` começa vazio porque a segmentação ainda não foi gerada. A próxima etapa é usar a própria box como prompt para o SAM, em um ROI centrado no objeto, evitando cortar o cetáceo por tiles.
 
-## Data augmentation
+## Arquitetura alvo do TCC
 
-O gerador local cobre os principais efeitos mostrados no Roboflow:
+```text
+Bounding boxes revisadas no Roboflow
+              |
+              +--> DINOv2 --> HDBSCAN --> classificação/revisão de clusters
+              |
+              +--> treino YOLO26 detector
+              |         |
+              |         +--> procurar possíveis objetos não anotados
+              |         +--> inferência em tiles + fusão no sistema global
+              |
+              +--> SAM guiado pela box --> máscaras --> dataset de segmentação
+```
 
-- Flip horizontal e vertical;
-- rotação de 90°;
-- rotação aleatória;
-- shear/affine;
-- brilho;
-- exposição/gamma;
-- blur;
-- motion blur;
-- ruído;
-- saturação e hue;
-- grayscale probabilístico;
-- cutout/coarse dropout;
-- mosaic 2x2;
-- efeitos fotométricos **dentro da região do objeto** (equivalentes à ideia de BB Brightness, BB Exposure, BB Blur, BB Noise, BB Motion Blur e BB Camera Gain).
+Para auditoria de anotações, a ideia é treinar o detector em partições sem incluir a imagem que está sendo auditada (out-of-fold) e comparar as predições com as boxes humanas por IoU. Predições fortes sem correspondência viram candidatos para revisão humana, não rótulos automáticos definitivos.
 
-As transformações geométricas são aplicadas à imagem **e às máscaras ao mesmo tempo**. Os bounding boxes são recalculados a partir das máscaras transformadas, evitando boxes fora de sincronia.
+## Imagens de vídeo e objetos quase pontuais
 
-Transformações geométricas somente dentro do bounding box, como `BB Rotation` ou `BB Shear`, não são ativadas nesta primeira versão porque podem criar bordas artificiais no animal e alterar a distribuição visual do objeto. Para o TCC, é melhor comparar esse tipo de augmentation separadamente em um experimento controlado.
+Quando o animal ocupa apenas um ou poucos pixels, nenhuma segmentação consegue recuperar um contorno que não existe na resolução original. Nesses frames, detecção e consistência temporal podem ser mais confiáveis que uma máscara detalhada.
 
-## Observações importantes para o TCC
+Para vídeos, o plano é combinar detecção por frame com rastreamento/consistência temporal. Um candidato que aparece de forma coerente em quadros consecutivos merece prioridade maior na auditoria do que um único pixel branco isolado em um só frame.
 
-1. **SAM não é detector semântico.** Ele encontra regiões candidatas; a semântica é adicionada posteriormente pelo usuário.
-2. **Clustering não garante classes biológicas.** Pode separar por cor da água, iluminação, orientação ou escala. Isso é útil para investigar domain shift, mas exige revisão humana.
-3. Para cetáceos pequenos em imagens aéreas, o uso de **tiling** é relevante e deve ser avaliado experimentalmente.
-4. Não misture imagens aumentadas em validação/teste. Gere augmentations somente para o conjunto de treinamento.
-5. O sistema exporta bounding box e segmentation a partir da mesma máscara, permitindo comparar depois YOLO Detection e YOLO Segmentation sobre o mesmo conjunto.
+## Regras experimentais
 
-## Próximos experimentos sugeridos
-
-- comparar SAM `vit_b`, `vit_l` e `vit_h`;
-- medir quantidade de propostas úteis vs. falsas propostas;
-- comparar clustering DINOv2 com embeddings ResNet/ViT;
-- medir esforço humano: quantidade de objetos revisados individualmente vs. rotulagem por cluster;
-- usar os dados revisados para treinar um YOLO de detecção e um YOLO de segmentação;
-- depois aplicar fine-tuning/LoRA e comparar custo computacional e qualidade.
+- Não misturar `train`, `valid` e `test` na criação do modelo final.
+- Se frames consecutivos vierem do mesmo vídeo, preferir divisão por vídeo ou por blocos temporais para reduzir vazamento entre treino e teste.
+- Manter o baseline SAM automático para comparação, mesmo que tenha desempenho ruim.
+- Medir cobertura, falsos candidatos, tempo computacional e esforço humano.
+- Aplicar augmentation apenas no conjunto de treinamento.
