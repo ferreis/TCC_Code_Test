@@ -14,3 +14,7 @@ roboflow>=1.1.45
 python-dotenv>=1.0
 tqdm>=4.66
 ultralytics>=8.4.101
+peft>=0.18.0,<0.20.0
+ultralytics-thop>=2.0.18
+polars>=1.0
+nvidia-ml-py>=12.0
