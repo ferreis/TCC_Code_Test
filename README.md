@@ -1,11 +1,12 @@
 # TCC Code Test — Object Discovery Lab
 
-Protótipo para descoberta, agrupamento e revisão de objetos em imagens aéreas de cetáceos.
+Protótipo para descoberta, agrupamento, revisão e treinamento de modelos em imagens aéreas de cetáceos.
 
-O projeto agora possui **dois fluxos complementares**:
+O projeto possui fluxos complementares:
 
 1. **Baseline totalmente automático:** imagem → SAM → propostas/máscaras → DINOv2 → HDBSCAN.
 2. **Fluxo recomendado para o dataset já anotado:** bounding boxes Roboflow → crops completos → DINOv2 → HDBSCAN → revisão humana → SAM guiado pela box (próxima etapa) → segmentação.
+3. **Matriz experimental YOLO26:** Detection e Segmentation em três regimes comparáveis: Base, LoRA e Full fine-tune.
 
 A segunda abordagem evita que um cetáceo já anotado seja cortado em partes apenas porque atravessa a borda de um tile.
 
@@ -76,6 +77,10 @@ weights/sam_vit_b_01ec64.pth
 ```bash
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True streamlit run app.py
 ```
+
+### 0. Upload e clusterizar
+
+Permite enviar uma imagem ou vídeo, extrair todos os frames ou amostrar por intervalo e executar SAM → DINOv2 → HDBSCAN. O vídeo preserva a referência ao frame original.
 
 ### 1. Descobrir com SAM
 
@@ -155,6 +160,57 @@ workspace/bbox_clusters_v1/
 
 No projeto de boxes, `mask_path` começa vazio porque a segmentação ainda não foi gerada. A próxima etapa é usar a própria box como prompt para o SAM, em um ROI centrado no objeto, evitando cortar o cetáceo por tiles.
 
+## Matriz de treinamento YOLO26
+
+A configuração experimental está em:
+
+```text
+configs/training_experiments.yaml
+```
+
+A primeira bateria usa YOLO26n e YOLO26n-seg:
+
+```text
+Detection
+├── Base: backbone congelado
+├── LoRA
+└── Full fine-tune
+
+Segmentation
+├── Base: backbone congelado
+├── LoRA
+└── Full fine-tune
+```
+
+Antes de iniciar os experimentos longos:
+
+```bash
+python scripts/train_experiments.py --group smoke_tests --only detect_yolo26n_smoke
+```
+
+Depois, para detecção:
+
+```bash
+python scripts/train_experiments.py --only detect_base detect_lora detect_full
+```
+
+Para LoRA, utilize o fork YOLO-Master:
+
+```bash
+python scripts/setup_yolo_master.py --dir /content/YOLO-Master
+```
+
+Os resultados de todos os experimentos são consolidados automaticamente em:
+
+```text
+workspace/training_runs/experiment_summary.csv
+workspace/training_runs/experiment_summary.json
+```
+
+O relatório guarda hiperparâmetros, parâmetros totais/treináveis, parâmetros LoRA, hardware, pico de VRAM, tempo de treino, tamanho dos checkpoints, métricas e velocidade de avaliação.
+
+Detalhes estão em `TRAINING.md`.
+
 ## Arquitetura alvo do TCC
 
 ```text
@@ -168,6 +224,8 @@ Bounding boxes revisadas no Roboflow
               |         +--> inferência em tiles + fusão no sistema global
               |
               +--> SAM guiado pela box --> máscaras --> dataset de segmentação
+                        |
+                        +--> YOLO26-seg Base / LoRA / Full fine-tune
 ```
 
 Para auditoria de anotações, a ideia é treinar o detector em partições sem incluir a imagem que está sendo auditada (out-of-fold) e comparar as predições com as boxes humanas por IoU. Predições fortes sem correspondência viram candidatos para revisão humana, não rótulos automáticos definitivos.
@@ -180,13 +238,14 @@ Para vídeos, o plano é combinar detecção por frame com rastreamento/consist�
 
 ## Google Colab
 
-Existe um notebook pronto em:
+Existem dois notebooks:
 
 ```text
 notebooks/TCC_Object_Discovery_Colab.ipynb
+notebooks/TCC_YOLO26_Experiments_Colab.ipynb
 ```
 
-Ele monta o Google Drive e mantém de forma persistente:
+Eles utilizam:
 
 ```text
 MyDrive/TCC_Code_Test_runtime/
@@ -206,7 +265,7 @@ ROBOFLOW_API_KEY
 NGROK_AUTHTOKEN   # opcional, só para abrir o Streamlit
 ```
 
-O notebook consegue baixar o dataset YOLO26, preservar pesos/resultados no Drive, executar o clustering das bounding boxes e abrir a mesma interface Streamlit por ngrok. Instruções detalhadas estão em `COLAB.md`.
+Instruções detalhadas estão em `COLAB.md`.
 
 ## Regras experimentais
 
@@ -215,3 +274,4 @@ O notebook consegue baixar o dataset YOLO26, preservar pesos/resultados no Drive
 - Manter o baseline SAM automático para comparação, mesmo que tenha desempenho ruim.
 - Medir cobertura, falsos candidatos, tempo computacional e esforço humano.
 - Aplicar augmentation apenas no conjunto de treinamento.
+- Na comparação Base × LoRA × Full, manter splits, seed, resolução, augmentation e protocolo comuns iguais; mudar apenas o regime de adaptação.
