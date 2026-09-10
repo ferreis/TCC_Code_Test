@@ -1,0 +1,5 @@
+[server]
+# Limite em MB. Vídeos de drone podem ultrapassar o padrão do Streamlit.
+# O arquivo enviado ainda ocupa RAM durante o upload, então evite elevar sem necessidade.
+maxUploadSize = 1024
+maxMessageSize = 1024
