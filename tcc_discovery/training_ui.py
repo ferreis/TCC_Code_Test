@@ -136,7 +136,7 @@ def render_training_page() -> None:
     c2.metric("VRAM", gpu["VRAM"])
     c3.metric("GPU-Util", gpu["GPU-Util"])
 
-    runtime_plan, plan = materialize_training_plan(
+    _, plan = materialize_training_plan(
         runtime,
         profile=profile,
         output_path="workspace/frontend_plan_preview.yaml",
@@ -166,13 +166,17 @@ def render_training_page() -> None:
         st.write("Parâmetros compartilhados")
         a, b, c, d = st.columns(4)
         epochs = a.number_input("Epochs", 1, 5000, int(training.get("epochs", 100)))
-        imgsz = b.selectbox("imgsz", [320, 480, 640, 768, 960, 1024, 1280], index=[320,480,640,768,960,1024,1280].index(int(training.get("imgsz", 640))) if int(training.get("imgsz", 640)) in [320,480,640,768,960,1024,1280] else 2)
+        sizes = [320, 480, 640, 768, 960, 1024, 1280]
+        current_size = int(training.get("imgsz", 640))
+        imgsz = b.selectbox("imgsz", sizes, index=sizes.index(current_size) if current_size in sizes else 2)
         batch = c.number_input("Batch", -1, 256, int(profile_cfg.get("batch", 8)), help="-1 permite auto-batch quando suportado.")
         workers = d.number_input("Workers", 0, 32, int(profile_cfg.get("workers", 2)))
 
         a, b, c, d = st.columns(4)
         device = a.text_input("Device", str(training.get("device", 0)))
-        cache = b.selectbox("Cache", ["false", "disk", "ram"], index=["false","disk","ram"].index(str(profile_cfg.get("cache", "disk")).lower()) if str(profile_cfg.get("cache", "disk")).lower() in ["false","disk","ram"] else 1)
+        cache_options = ["false", "disk", "ram"]
+        current_cache = str(profile_cfg.get("cache", "disk")).lower()
+        cache = b.selectbox("Cache", cache_options, index=cache_options.index(current_cache) if current_cache in cache_options else 1)
         amp = c.checkbox("AMP", bool(training.get("amp", True)))
         deterministic = d.checkbox("Determinístico", bool(training.get("deterministic", True)))
 
@@ -255,8 +259,11 @@ def render_training_page() -> None:
     if str(stage.get("regime", "")).startswith("lora") and not lora_available:
         st.warning("YOLO-Master/LoRA não está disponível neste ambiente.")
         if st.button("Instalar/atualizar YOLO-Master neste ambiente"):
+            yolo_dir = Path(str(profile_cfg.get("yolo_master_dir", ".yolo-master"))).expanduser()
+            if not yolo_dir.is_absolute():
+                yolo_dir = (REPO_ROOT / yolo_dir).resolve()
             result = subprocess.run(
-                [sys.executable, "scripts/setup_yolo_master.py", "--dir", str(REPO_ROOT / ".yolo-master")],
+                [sys.executable, "scripts/setup_yolo_master.py", "--dir", str(yolo_dir)],
                 cwd=REPO_ROOT,
                 text=True,
                 stdout=subprocess.PIPE,
@@ -264,7 +271,7 @@ def render_training_page() -> None:
             )
             st.code(result.stdout, language="text")
             if result.returncode == 0:
-                st.success("Backend instalado. O processo de treinamento será aberto em um Python novo.")
+                st.success("Backend instalado. O treinamento roda em um processo Python novo e já poderá usar a LoRA.")
             else:
                 st.error("Falha ao instalar YOLO-Master.")
 
@@ -272,11 +279,10 @@ def render_training_page() -> None:
     running = _pid_alive(state.get("pid"))
     st.divider()
     st.write("Execução")
+    st.caption("Salve os parâmetros acima antes de iniciar. O treino é executado em segundo plano e continua mesmo com reruns da página.")
     b1, b2, b3 = st.columns(3)
 
     if b1.button("Iniciar treinamento", type="primary", disabled=running):
-        # Recarrega o YAML para garantir que o subprocesso use exatamente o que foi salvo.
-        runtime = load_runtime_config(runtime_path)
         log_path = STATE_DIR / f"{stage_id}.log"
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         log_handle = log_path.open("w", encoding="utf-8", buffering=1)
