@@ -1,4 +1,7 @@
-# Google Colab já fornece PyTorch/CUDA. Evitamos reinstalar torch/torchvision aqui.
+# Google Colab já fornece PyTorch/CUDA. Não reinstalamos torch/torchvision.
+# O pacote ultralytics oficial NÃO é instalado aqui: o notebook instala uma
+# cópia não-editável do Tencent/YOLO-Master para Base, LoRA e Full usarem o
+# mesmo backend sem precisar reiniciar o kernel.
 transformers>=4.44
 segment-anything>=1.0
 hdbscan>=0.8.40
@@ -13,4 +16,17 @@ roboflow>=1.1.45
 python-dotenv>=1.0
 tqdm>=4.66
 pyngrok>=7.2
-ultralytics>=8.4.101
+
+# Dependências usadas pelo YOLO-Master/Ultralytics. Mantidas aqui para que a
+# instalação do fork possa usar --no-deps e nunca tentar substituir o PyTorch
+# CUDA já fornecido pelo Colab.
+filelock>=3.16.1
+matplotlib>=3.3.0
+requests>=2.23.0
+scipy>=1.4.1
+psutil>=5.8.0
+polars>=0.20.0
+nvidia-ml-py>=12.0.0
+ultralytics-thop>=2.0.18
+pandas>=1.1.4
+peft>=0.18.0,<0.20.0
