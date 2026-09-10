@@ -1,0 +1,111 @@
+# Configuração ÚNICA compartilhada por terminal, Streamlit e Google Colab.
+# Segredos reais não ficam neste arquivo; use .env local ou Colab Secrets.
+version: 1
+
+default_profile: local
+
+paths:
+  training_plan: configs/training_experiments.yaml
+  training_project: workspace/training_runs
+  analysis_export: exports/TCC_Analise_models
+
+models:
+  detect: yolo26n.pt
+  segment: yolo26n-seg.pt
+
+datasets:
+  det_general: data/roboflow/data.yaml
+  seg_general: data/segmentation/data.yaml
+  det_lora_01: data/specialists/detection/lora_01/data.yaml
+  det_lora_02: data/specialists/detection/lora_02/data.yaml
+  det_lora_03: data/specialists/detection/lora_03/data.yaml
+  det_lora_04: data/specialists/detection/lora_04/data.yaml
+  det_lora_05: data/specialists/detection/lora_05/data.yaml
+  seg_lora_01: data/specialists/segmentation/lora_01/data.yaml
+  seg_lora_02: data/specialists/segmentation/lora_02/data.yaml
+  seg_lora_03: data/specialists/segmentation/lora_03/data.yaml
+  seg_lora_04: data/specialists/segmentation/lora_04/data.yaml
+  seg_lora_05: data/specialists/segmentation/lora_05/data.yaml
+
+training:
+  epochs: 100
+  imgsz: 640
+  device: 0
+  amp: true
+  optimizer: auto
+  patience: 30
+  seed: 42
+  deterministic: true
+  close_mosaic: 10
+  save_period: 10
+  plots: true
+  verbose: true
+  eval_split: test
+
+smoke:
+  epochs: 3
+  imgsz: 640
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.10
+  gradient_checkpointing: true
+  include_head: true
+
+profiles:
+  local:
+    # Perfil inicial conservador para GPU ~6 GB (ex.: GTX 1660).
+    batch: 8
+    workers: 2
+    cache: disk
+    use_local_dataset_cache: false
+    local_data_root: workspace/local_training_data
+    refresh_local_dataset_cache: false
+
+  colab:
+    # Perfil inicial para Tesla T4 ~15 GB.
+    batch: 32
+    workers: 4
+    cache: disk
+    use_local_dataset_cache: true
+    local_data_root: /content/TCC_training_data
+    refresh_local_dataset_cache: false
+
+roboflow:
+  workspace: rafael-fernando-dos-reis-mecabo
+  format: yolo26
+  general:
+    project: detecao-de-cetaceos-afrzs-iqey9
+    version: 1
+    output: data/roboflow
+    download: true
+    overwrite: false
+  specialists:
+    det_lora_01: {project: COLOQUE_SLUG_LORA_01, version: 1, output: data/specialists/detection/lora_01, download: false, overwrite: false}
+    det_lora_02: {project: COLOQUE_SLUG_LORA_02, version: 1, output: data/specialists/detection/lora_02, download: false, overwrite: false}
+    det_lora_03: {project: COLOQUE_SLUG_LORA_03, version: 1, output: data/specialists/detection/lora_03, download: false, overwrite: false}
+    det_lora_04: {project: COLOQUE_SLUG_LORA_04, version: 1, output: data/specialists/detection/lora_04, download: false, overwrite: false}
+    det_lora_05: {project: COLOQUE_SLUG_LORA_05, version: 1, output: data/specialists/detection/lora_05, download: false, overwrite: false}
+
+clustering:
+  enabled: false
+  source: data/roboflow/train
+  output: workspace/bbox_clusters_colab
+  context_scale: 1.8
+  min_crop_size_px: 64
+  min_cluster_size: 6
+  embedding_batch_size: 8
+  cpu_fallback_on_oom: true
+
+sam:
+  download: false
+  checkpoint: weights/sam_vit_b_01ec64.pth
+
+streamlit:
+  port: 8501
+
+secrets:
+  github: GITHUB_TOKEN
+  roboflow: ROBOFLOW_API_KEY
+  ngrok: NGROK_AUTHTOKEN
