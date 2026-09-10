@@ -18,26 +18,31 @@ Esse notebook concentra descoberta, clustering, interface Streamlit e a matriz c
    - `NGROK_AUTHTOKEN`: opcional, necessário apenas para abrir a interface Streamlit por URL pública.
 4. Execute as células na ordem.
 
-## Importante: não atualizar pip/setuptools/wheel
+## Regra do ambiente Python
 
-O notebook foi ajustado para evitar o aviso do Colab:
-
-```text
-WARNING: The following packages were previously imported in this runtime: [_distutils_hack]
-You must restart the runtime in order to use newly installed versions.
-```
-
-Por isso, **não execute** no Colab:
+No Colab, não execute:
 
 ```bash
 pip install --upgrade pip setuptools wheel
 ```
 
-O runtime já fornece essas ferramentas. O notebook instala apenas `requirements-colab.txt`, sem atualizar as ferramentas-base.
+O notebook não atualiza essas ferramentas. Também não instala primeiro o `ultralytics` oficial para depois substituí-lo.
 
-Também foi alterada a ordem do setup: o YOLO-Master é instalado **antes do primeiro `import ultralytics`**. Isso evita instalar/substituir o backend depois que o módulo já foi carregado e reduz a necessidade de reiniciar a sessão.
+O arquivo `requirements-colab.txt` instala apenas as dependências necessárias, preservando o PyTorch/CUDA fornecido pelo próprio Colab. Em seguida, `scripts/setup_yolo_master.py` clona o Tencent/YOLO-Master e instala o pacote `ultralytics` diretamente desse repositório.
 
-A ordem inicial correta é:
+A instalação padrão do YOLO-Master é **não-editável**. Isso é intencional: instalações editáveis podem depender de arquivos `.pth` processados pelo Python na inicialização e, em notebooks, isso pode tornar o pacote invisível até um reinício de kernel.
+
+O setup usa o mesmo `sys.executable` do notebook e, ao final, abre um segundo processo Python com esse mesmo interpretador para validar:
+
+```text
+import ultralytics
+ultralytics.utils.lora disponível
+caminho do pacote instalado
+```
+
+Se essa verificação falhar, a célula de instalação falha imediatamente. O notebook não deve avançar para treino nesse caso.
+
+A ordem inicial é:
 
 ```text
 verificar GPU sem importar torch/ultralytics
@@ -48,9 +53,11 @@ clonar/atualizar GitHub
         ↓
 instalar requirements-colab.txt
         ↓
-instalar YOLO-Master
+instalar YOLO-Master não-editável
         ↓
-importar e validar PyTorch/CUDA/Ultralytics/LoRA
+validar import em processo Python novo
+        ↓
+validar novamente dentro do kernel
 ```
 
 ## Persistência
@@ -69,9 +76,7 @@ Essas pastas são ligadas ao repositório clonado em `/content/TCC_Code_Test` po
 
 ## Dependências
 
-Use `requirements-colab.txt`. O Colab já fornece PyTorch/CUDA, portanto o arquivo não reinstala `torch` nem `torchvision`.
-
-A distribuição `ultralytics` é instalada como dependência base. Em seguida, antes do primeiro import, o notebook instala o fork Tencent/YOLO-Master em modo editável. Os experimentos Base, LoRA e Full da sessão passam então a usar a mesma implementação.
+`requirements-colab.txt` não reinstala `torch` nem `torchvision` e não contém o pacote oficial `ultralytics`. As dependências do YOLO-Master, incluindo `peft`, `ultralytics-thop`, `polars` e `nvidia-ml-py`, são preparadas separadamente. Depois o fork é instalado com `--no-deps`, evitando que sua instalação tente trocar o PyTorch CUDA do Colab.
 
 ## Fluxo de descoberta recomendado
 
@@ -151,7 +156,7 @@ Detalhes metodológicos estão em `TRAINING.md`.
 
 ## Uso de uma única GPU
 
-O notebook foi unificado justamente para usar a mesma sessão e a mesma GPU. Antes de iniciar treinamentos longos, existe uma célula para encerrar Streamlit/ngrok e liberar a VRAM.
+O notebook foi unificado para usar a mesma sessão e a mesma GPU. Antes dos treinamentos longos, existe uma célula para encerrar Streamlit/ngrok e liberar VRAM.
 
 ## Observação sobre sessões longas
 
