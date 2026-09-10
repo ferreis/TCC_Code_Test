@@ -22,7 +22,7 @@ from tcc_discovery.core import (
 )
 from tcc_discovery.upload_clustering import prepare_uploaded_media
 
-APP_VERSION = "0.5-upload-clustering"
+APP_VERSION = "0.5.1-full-video"
 _KEEP = object()
 VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm"}
 
@@ -121,8 +121,8 @@ project_dir = Path(st.sidebar.text_input("Projeto local", project_default))
 if page == "0. Upload e clusterizar":
     st.subheader("Upload rápido de imagem ou vídeo")
     st.write(
-        "Envie uma imagem ou vídeo. Imagens são processadas diretamente; vídeos são amostrados em frames. "
-        "Em seguida o SAM gera candidatos, o DINOv2 extrai embeddings e o HDBSCAN forma os clusters."
+        "Envie uma imagem ou vídeo. Para vídeo você pode processar todos os frames ou percorrer toda a duração "
+        "por amostragem. Depois o SAM gera candidatos, o DINOv2 extrai embeddings e o HDBSCAN forma os clusters."
     )
     uploaded = st.file_uploader(
         "Imagem ou vídeo",
@@ -143,33 +143,78 @@ if page == "0. Upload e clusterizar":
         c1, c2, c3 = st.columns(3)
         with c1:
             if is_video:
-                sample_every = st.selectbox(
-                    "Extrair 1 frame a cada",
-                    [0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
-                    index=2,
-                    format_func=lambda x: f"{x:g} s",
+                video_mode = st.radio(
+                    "Modo de leitura do vídeo",
+                    ["Todos os frames", "Amostrar por intervalo"],
+                    index=0,
+                    help=(
+                        "Todos os frames processa cada quadro do vídeo. Amostragem percorre toda a duração, "
+                        "mas mantém apenas um frame a cada intervalo escolhido."
+                    ),
                 )
-                max_frames = st.number_input("Máximo de frames", 1, 2000, 120, step=10)
+                extract_all_frames = video_mode == "Todos os frames"
+                if extract_all_frames:
+                    sample_every = 0.0
+                    max_frames = 0
+                    st.warning(
+                        "Todos os frames: não há limite de 120. Em vídeos longos isso pode gerar milhares de frames "
+                        "e o SAM pode levar muitas horas ou dias, dependendo da duração, FPS e resolução."
+                    )
+                else:
+                    sample_every = st.selectbox(
+                        "Extrair 1 frame a cada",
+                        [0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
+                        index=2,
+                        format_func=lambda x: f"{x:g} s",
+                    )
+                    max_frames = st.number_input(
+                        "Máximo de frames (0 = sem limite)",
+                        min_value=0,
+                        max_value=1_000_000,
+                        value=0,
+                        step=10,
+                        help=(
+                            "0 percorre toda a duração do vídeo sem limitar a quantidade de frames amostrados. "
+                            "Ex.: 1 frame/s em vídeo de 10 min = aproximadamente 600 frames."
+                        ),
+                    )
             else:
+                extract_all_frames = False
                 sample_every = 1.0
                 max_frames = 1
-            checkpoint = st.text_input("Checkpoint SAM", "weights/sam_vit_b_01ec64.pth", key="upload_sam_checkpoint")
+            checkpoint = st.text_input(
+                "Checkpoint SAM", "weights/sam_vit_b_01ec64.pth", key="upload_sam_checkpoint"
+            )
 
         with c2:
-            points = st.select_slider("SAM points_per_side", [8, 12, 16, 24, 32], value=16, key="upload_points")
-            points_batch = st.selectbox("SAM points_per_batch", [1, 2, 4, 8, 16], index=2, key="upload_points_batch")
-            max_objects = st.number_input("Máx. objetos por frame", 1, 300, 30, key="upload_max_objects")
-            min_area = st.number_input("Área mínima da máscara (px)", 10, 100000, 80, key="upload_min_area")
+            points = st.select_slider(
+                "SAM points_per_side", [8, 12, 16, 24, 32], value=16, key="upload_points"
+            )
+            points_batch = st.selectbox(
+                "SAM points_per_batch", [1, 2, 4, 8, 16], index=2, key="upload_points_batch"
+            )
+            max_objects = st.number_input(
+                "Máx. objetos por frame", 1, 300, 30, key="upload_max_objects"
+            )
+            min_area = st.number_input(
+                "Área mínima da máscara (px)", 10, 100000, 80, key="upload_min_area"
+            )
 
         with c3:
-            auto_tile_size = st.selectbox("Auto-tile", [256, 384, 512, 640, 768, 1024], index=2, key="upload_tile")
-            min_cluster = st.number_input("Mínimo por cluster", 2, 100, 3, key="upload_min_cluster")
-            embedding_batch = st.selectbox("Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2, key="upload_dino_batch")
+            auto_tile_size = st.selectbox(
+                "Auto-tile", [256, 384, 512, 640, 768, 1024], index=2, key="upload_tile"
+            )
+            min_cluster = st.number_input(
+                "Mínimo por cluster", 2, 100, 3, key="upload_min_cluster"
+            )
+            embedding_batch = st.selectbox(
+                "Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2, key="upload_dino_batch"
+            )
             overwrite = st.checkbox("Recriar projeto", value=False, key="upload_overwrite")
 
         st.info(
-            "Para a GTX 1660, os valores padrão são conservadores. No Colab com GPU mais forte você pode aumentar "
-            "points_per_side e o batch do DINOv2. O vídeo mantém referência ao número do frame original."
+            "Na GTX 1660, mantenha os valores padrão. Para vídeo completo, o limitante principal deixa de ser só a VRAM: "
+            "tempo de execução e espaço em disco também crescem proporcionalmente ao número de frames."
         )
 
         if st.button("Preparar upload e clusterizar", type="primary"):
@@ -181,6 +226,7 @@ if page == "0. Upload e clusterizar":
                     uploaded.name,
                     sample_every_seconds=float(sample_every),
                     max_frames=int(max_frames),
+                    extract_all_frames=bool(extract_all_frames),
                     overwrite=True,
                     progress_cb=prep_progress,
                 )
@@ -235,17 +281,11 @@ if page == "0. Upload e clusterizar":
 elif page == "1. Descobrir com SAM":
     st.subheader("Descoberta não supervisionada com SAM")
     st.caption(
-        "Esta etapa é o baseline totalmente automático. Os tiles são internos e as coordenadas voltam para a imagem original, "
-        "mas um objeto cortado exatamente na borda de tiles ainda pode gerar fragmentos separados."
+        "Baseline totalmente automático. Os tiles são internos e as coordenadas voltam para a imagem original."
     )
     input_dir = st.text_input("Pasta de imagens", "data/roboflow/train/images")
     checkpoint = st.text_input("Checkpoint SAM", "weights/sam_vit_b_01ec64.pth")
-
-    low_memory = st.checkbox(
-        "Modo seguro para GPU de 6 GB",
-        value=True,
-        help="Usa batches pequenos, auto-tiling e fallback para CPU se a VRAM acabar.",
-    )
+    low_memory = st.checkbox("Modo seguro para GPU de 6 GB", value=True)
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -257,7 +297,6 @@ elif page == "1. Descobrir com SAM":
         )
         crop_layers = st.selectbox("SAM crop_n_layers", [0, 1, 2], index=0 if low_memory else 1)
         min_area = st.number_input("Área mínima da máscara (px)", 10, 100000, 120)
-
     with c2:
         max_objects = st.number_input("Máx. objetos/imagem", 1, 300, 30 if low_memory else 50)
         manual_tile = st.selectbox(
@@ -270,18 +309,14 @@ elif page == "1. Descobrir com SAM":
         auto_tile_trigger = st.selectbox(
             "Ativar auto-tile acima de", [768, 1024, 1280, 1536, 2048, 3072], index=1 if low_memory else 3
         )
-
     with c3:
         min_cluster = st.number_input("Mínimo por cluster", 2, 100, 3 if low_memory else 6)
-        embedding_batch = st.selectbox("Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2 if low_memory else 3)
+        embedding_batch = st.selectbox(
+            "Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2 if low_memory else 3
+        )
         cpu_fallback = st.checkbox("Fallback SAM para CPU se faltar VRAM", value=True)
         dino_cpu_fallback = st.checkbox("Fallback DINOv2 para CPU", value=True)
         overwrite = st.checkbox("Recriar projeto", value=False)
-
-    if low_memory:
-        st.info(
-            "Perfil GTX 1660: points_per_side=16, points_per_batch=4, crop_n_layers=0, auto-tile=512 e DINO batch=4."
-        )
 
     if st.button("Executar descoberta", type="primary"):
         cfg = DiscoveryConfig(
@@ -311,8 +346,7 @@ elif page == "1. Descobrir com SAM":
 elif page == "2. Clusterizar bounding boxes":
     st.subheader("Clustering usando as bounding boxes já revisadas no Roboflow")
     st.write(
-        "Nesta etapa o SAM não procura o objeto. Cada bounding box YOLO é recortada inteira, com contexto ao redor, "
-        "e o DINOv2 + HDBSCAN agrupa esses objetos. Portanto o cetáceo não é cortado por uma borda de tile."
+        "Cada bounding box YOLO é recortada inteira, com contexto ao redor, e o DINOv2 + HDBSCAN agrupa os objetos."
     )
     split_dir = st.text_input("Pasta do split YOLO", "data/roboflow/train")
     c1, c2, c3 = st.columns(3)
@@ -321,14 +355,14 @@ elif page == "2. Clusterizar bounding boxes":
         min_crop = st.selectbox("Crop mínimo para objetos minúsculos (px)", [32, 48, 64, 96, 128, 192], index=2)
     with c2:
         min_cluster = st.number_input("Mínimo por cluster", 2, 100, 6)
-        embedding_batch = st.selectbox("Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2, key="bbox_dino_batch")
+        embedding_batch = st.selectbox(
+            "Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2, key="bbox_dino_batch"
+        )
     with c3:
         dino_cpu_fallback = st.checkbox("Fallback DINOv2 para CPU", value=True, key="bbox_cpu_fallback")
         overwrite = st.checkbox("Recriar projeto", value=False, key="bbox_overwrite")
 
-    st.info(
-        "Para seu dataset, use outro Projeto local, por exemplo workspace/bbox_clusters_v1, para preservar o baseline do SAM."
-    )
+    st.info("Use outro Projeto local, por exemplo workspace/bbox_clusters_v1, para preservar o baseline do SAM.")
 
     if st.button("Clusterizar boxes anotadas", type="primary"):
         cfg = BoxClusteringConfig(
@@ -431,7 +465,6 @@ elif page == "4. Revisar classificados":
     group = [o for o in visible if int(o.get("cluster", -1)) == int(cluster)]
     current = Counter(o.get("label") for o in group)
     st.write("Classes atuais no grupo:", dict(current))
-
     _show_thumbnails(project_dir, group, f"review_{selected_label}_{cluster}")
 
     new_label = st.text_input("Alterar classe do grupo visível", value=next(iter(current), ""))
@@ -451,7 +484,9 @@ elif page == "4. Revisar classificados":
     obj_id = st.selectbox("Objeto classificado", [o["id"] for o in group], key="review_obj")
     obj = next(o for o in group if o["id"] == obj_id)
     st.image(_render_overlay(project_dir, obj), caption=obj_id, use_container_width=True)
-    individual_label = st.text_input("Classe deste objeto", value=obj.get("label") or "", key=f"review_label_{obj_id}")
+    individual_label = st.text_input(
+        "Classe deste objeto", value=obj.get("label") or "", key=f"review_label_{obj_id}"
+    )
     b1, b2, b3 = st.columns(3)
     if b1.button("Salvar classe individual"):
         if individual_label.strip():
@@ -503,8 +538,7 @@ elif page == "6. Exportar":
 
     if catalog.get("project_type") == "bbox_clustering":
         st.info(
-            "Este projeto foi criado a partir das bounding boxes existentes. Ele ainda não possui máscaras de segmentação. "
-            "Por enquanto exporte o manifesto de revisão; a próxima etapa será gerar máscaras com SAM guiado pela box."
+            "Este projeto foi criado a partir das bounding boxes existentes. Ele ainda não possui máscaras de segmentação."
         )
         output = st.text_input("Manifesto JSON", "exports/bbox_clusters_manifest.json")
         if st.button("Exportar manifesto", type="primary"):
@@ -520,7 +554,7 @@ elif page == "6. Exportar":
                 st.json(result)
             except Exception as exc:
                 st.exception(exc)
-        st.code("labels_detection/*.txt   # YOLO bounding box\nlabels_segmentation/*.txt # YOLO segmentation\nclasses.txt\ndata.yaml")
+        st.code("labels_detection/*.txt\nlabels_segmentation/*.txt\nclasses.txt\ndata.yaml")
 
 
 else:
@@ -528,7 +562,7 @@ else:
     catalog = _project_or_stop(project_dir)
     if catalog.get("project_type") == "bbox_clustering":
         st.warning(
-            "O projeto de bounding boxes ainda não possui máscaras. Gere primeiro as segmentações guiadas pelas boxes antes de usar augmentation com máscaras."
+            "O projeto de bounding boxes ainda não possui máscaras. Gere primeiro as segmentações guiadas pelas boxes."
         )
         st.stop()
 
@@ -539,7 +573,7 @@ else:
     aggressive = c3.checkbox("Augmentation agressiva", value=False)
     mosaic = st.checkbox("Gerar mosaicos 2x2", value=True)
     st.write(
-        "Inclui flip, rotação, shear/affine, brilho, exposição, blur, motion blur, ruído, saturação/hue, grayscale, cutout e efeitos fotométricos."
+        "Inclui flip, rotação, shear/affine, brilho, exposição, blur, motion blur, ruído, saturação/hue, grayscale e cutout."
     )
     if st.button("Gerar dataset aumentado", type="primary"):
         try:
