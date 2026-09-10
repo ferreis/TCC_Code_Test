@@ -16,6 +16,13 @@ from typing import Any
 import torch
 import yaml
 
+TRAIN_GROUPS = (
+    "general_models",
+    "lora_specialists",
+    "full_finetune_controls",
+)
+ALL_GROUPS = ("smoke_tests",) + TRAIN_GROUPS
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -137,17 +144,51 @@ def load_experiment_config(path: str | Path) -> dict[str, Any]:
     return cfg
 
 
+def _merge_groups(config: dict[str, Any], groups: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        merged.update(config.get(group, {}) or {})
+    return merged
+
+
 def list_experiments(config: dict[str, Any], group: str = "experiments") -> dict[str, dict[str, Any]]:
+    # `experiments` é mantido como alias de compatibilidade, mas agora significa
+    # as três etapas separadas: modelo geral, LoRAs especialistas e controles full FT.
+    if group == "experiments":
+        return _merge_groups(config, TRAIN_GROUPS)
     if group == "all":
-        merged: dict[str, dict[str, Any]] = {}
-        merged.update(config.get("smoke_tests", {}) or {})
-        merged.update(config.get("experiments", {}) or {})
-        return merged
+        return _merge_groups(config, ALL_GROUPS)
     return dict(config.get(group, {}) or {})
+
+
+def _all_named_experiments(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return _merge_groups(config, ALL_GROUPS)
 
 
 def _resolve_data_path(data: str | Path) -> Path:
     return Path(data).expanduser().resolve()
+
+
+def _resolve_model_source(
+    experiment_name: str,
+    experiment: dict[str, Any],
+    config: dict[str, Any],
+    project: Path,
+) -> tuple[str, str | None, Path | None]:
+    base_from = experiment.get("base_from")
+    if not base_from:
+        model = experiment.get("model")
+        if not model:
+            raise KeyError(f"{experiment_name}: defina `model` ou `base_from`.")
+        return str(model), None, None
+
+    all_experiments = _all_named_experiments(config)
+    if base_from not in all_experiments:
+        raise KeyError(f"{experiment_name}: base_from={base_from!r} não existe na configuração.")
+    parent = all_experiments[str(base_from)]
+    parent_run = str(parent.get("name", base_from))
+    checkpoint = (project / parent_run / "weights" / "best.pt").resolve()
+    return str(checkpoint), str(base_from), checkpoint
 
 
 def _metrics_dict(metrics) -> dict[str, Any]:
@@ -187,10 +228,16 @@ def _write_summary(summary_path: Path, row: dict[str, Any]) -> None:
         writer.writerows(flat_rows)
 
 
+def _dir_size_mb(path: Path) -> float:
+    total = sum(p.stat().st_size for p in path.rglob("*") if p.is_file()) if path.exists() else 0
+    return round(total / 1024**2, 3)
+
+
 def run_experiment(
     experiment_name: str,
     experiment: dict[str, Any],
     global_cfg: dict[str, Any],
+    config: dict[str, Any],
     *,
     resume: bool = False,
     evaluate: bool = True,
@@ -200,28 +247,32 @@ def run_experiment(
     from ultralytics import YOLO
 
     merged_train = dict(global_cfg)
-    project = Path(str(merged_train.pop("project", "workspace/training_runs")))
+    project = Path(str(merged_train.pop("project", "workspace/training_runs"))).expanduser().resolve()
     eval_split = str(merged_train.pop("eval_split", "test"))
-
     merged_train.update(experiment.get("train_args", {}) or {})
-    model_name = str(experiment["model"])
+
     data_path = _resolve_data_path(experiment["data"])
     run_name = str(experiment.get("name", experiment_name))
     regime = str(experiment.get("regime", "unknown"))
     task = str(experiment.get("task", "detect"))
-
-    project = project.expanduser().resolve()
     project.mkdir(parents=True, exist_ok=True)
     run_dir = project / run_name
     metadata_dir = run_dir / "tcc_metadata"
     summary_csv = project / "experiment_summary.csv"
 
+    model_source, base_from, base_checkpoint = _resolve_model_source(
+        experiment_name, experiment, config, project
+    )
+
     base_row: dict[str, Any] = {
         "experiment": experiment_name,
+        "label": experiment.get("label", experiment_name),
         "run_name": run_name,
         "task": task,
         "regime": regime,
-        "model": model_name,
+        "model_source": model_source,
+        "base_from": base_from,
+        "base_checkpoint": str(base_checkpoint) if base_checkpoint else None,
         "data": str(data_path),
         "status": "planned",
         "environment": _environment(),
@@ -238,11 +289,20 @@ def run_experiment(
         print(f"[SKIP] {experiment_name}: dataset não encontrado: {data_path}")
         return base_row
 
-    if regime == "lora" and not _has_yolo_master_lora():
+    if base_checkpoint is not None and not base_checkpoint.exists() and not dry_run:
         message = (
-            "Este experimento LoRA requer o fork YOLO-Master, que adiciona LoRA ao YOLO26. "
-            "Instale-o antes de executar os experimentos LoRA."
+            f"{experiment_name}: o modelo geral ainda não existe em {base_checkpoint}. "
+            f"Treine primeiro `{base_from}` e depois execute este especialista/controle."
         )
+        base_row["status"] = "missing_base_checkpoint"
+        base_row["error"] = message
+        _save_json(metadata_dir / "experiment.json", base_row)
+        _write_summary(summary_csv, base_row)
+        raise FileNotFoundError(message)
+
+    is_lora = regime.startswith("lora")
+    if is_lora and not _has_yolo_master_lora():
+        message = "Este experimento LoRA requer Tencent/YOLO-Master com ultralytics.utils.lora."
         base_row["status"] = "missing_lora_backend"
         base_row["error"] = message
         _save_json(metadata_dir / "experiment.json", base_row)
@@ -272,7 +332,7 @@ def run_experiment(
         yolo = YOLO(str(last_pt))
         train_kwargs = {"resume": True}
     else:
-        yolo = YOLO(model_name)
+        yolo = YOLO(model_source)
 
     initial_stats = _parameter_stats(yolo.model)
     base_row["initial_parameters"] = initial_stats
@@ -316,49 +376,64 @@ def run_experiment(
             row["peak_vram_gb"] = round(torch.cuda.max_memory_allocated() / 1024**3, 3)
             row["peak_vram_reserved_gb"] = round(torch.cuda.max_memory_reserved() / 1024**3, 3)
 
-        if regime == "lora":
+        adapter_dir: Path | None = None
+        if is_lora:
             adapter_dir = save_dir / "lora_adapter"
-            try:
-                if hasattr(yolo, "save_lora_only"):
-                    yolo.save_lora_only(str(adapter_dir))
-                    row["lora_adapter"] = str(adapter_dir)
-            except Exception as exc:
-                row["lora_adapter_save_error"] = str(exc)
+            if not hasattr(yolo, "save_lora_only"):
+                raise RuntimeError("YOLO-Master carregado, mas save_lora_only() não está disponível.")
+            saved = yolo.save_lora_only(str(adapter_dir))
+            if saved is False:
+                raise RuntimeError("save_lora_only() retornou False; adapter não foi persistido.")
+            row["lora_adapter"] = str(adapter_dir)
+            row["lora_adapter_mb"] = _dir_size_mb(adapter_dir)
+            row["primary_artifact"] = str(adapter_dir)
+        else:
+            row["primary_artifact"] = str(best_pt) if best_pt.exists() else None
 
-        if evaluate and best_pt.exists():
+        if evaluate:
             eval_started = time.perf_counter()
-            evaluator = YOLO(str(best_pt))
-            try:
-                metrics = evaluator.val(
-                    data=str(data_path),
-                    split=eval_split,
-                    imgsz=int(merged_train.get("imgsz", 640)),
-                    batch=merged_train.get("batch", 16),
-                    device=merged_train.get("device", 0),
-                    workers=int(merged_train.get("workers", 2)),
-                    plots=True,
-                )
-                row["eval_split"] = eval_split
-            except Exception as exc:
-                if eval_split != "val":
+            if is_lora and adapter_dir is not None:
+                # Avalia a arquitetura modular real: checkpoint geral + adapter separado.
+                evaluator = YOLO(model_source)
+                evaluator.load_lora(str(adapter_dir), trainable=False)
+            elif best_pt.exists():
+                evaluator = YOLO(str(best_pt))
+            else:
+                evaluator = None
+
+            if evaluator is not None:
+                try:
                     metrics = evaluator.val(
                         data=str(data_path),
-                        split="val",
+                        split=eval_split,
                         imgsz=int(merged_train.get("imgsz", 640)),
                         batch=merged_train.get("batch", 16),
                         device=merged_train.get("device", 0),
                         workers=int(merged_train.get("workers", 2)),
                         plots=True,
                     )
-                    row["eval_split"] = "val"
-                    row["eval_fallback_reason"] = str(exc)
-                else:
-                    raise
-            row["eval_seconds"] = round(time.perf_counter() - eval_started, 3)
-            row["eval_metrics"] = _metrics_dict(metrics)
-            speed = getattr(metrics, "speed", None)
-            if isinstance(speed, dict):
-                row["eval_speed_ms"] = {str(k): _jsonable(v) for k, v in speed.items()}
+                    row["eval_split"] = eval_split
+                except Exception as exc:
+                    if eval_split != "val":
+                        metrics = evaluator.val(
+                            data=str(data_path),
+                            split="val",
+                            imgsz=int(merged_train.get("imgsz", 640)),
+                            batch=merged_train.get("batch", 16),
+                            device=merged_train.get("device", 0),
+                            workers=int(merged_train.get("workers", 2)),
+                            plots=True,
+                        )
+                        row["eval_split"] = "val"
+                        row["eval_fallback_reason"] = str(exc)
+                    else:
+                        raise
+                row["eval_seconds"] = round(time.perf_counter() - eval_started, 3)
+                row["eval_metrics"] = _metrics_dict(metrics)
+                row["eval_mode"] = "base_plus_adapter" if is_lora else "checkpoint"
+                speed = getattr(metrics, "speed", None)
+                if isinstance(speed, dict):
+                    row["eval_speed_ms"] = {str(k): _jsonable(v) for k, v in speed.items()}
 
         _save_json(metadata_dir / "experiment.json", row)
         _write_summary(summary_csv, row)
@@ -396,7 +471,10 @@ def run_matrix(
     experiments = list_experiments(config, group)
     if only:
         wanted = set(only)
-        experiments = {k: v for k, v in experiments.items() if k in wanted}
+        # --only pode selecionar nomes de qualquer grupo, sem forçar que LoRAs
+        # sejam executados junto com o modelo geral.
+        all_named = _all_named_experiments(config)
+        experiments = {k: all_named[k] for k in only if k in all_named}
         missing = wanted.difference(experiments)
         if missing:
             raise KeyError(f"Experimentos não encontrados: {sorted(missing)}")
@@ -404,12 +482,14 @@ def run_matrix(
     results: list[dict[str, Any]] = []
     for name, experiment in experiments.items():
         if not bool(experiment.get("enabled", True)):
+            print(f"[SKIP] {name}: enabled=false")
             continue
-        print(f"\n{'=' * 80}\nEXPERIMENTO: {name}\n{'=' * 80}")
+        print(f"\n{'=' * 80}\nETAPA: {name} — {experiment.get('label', name)}\n{'=' * 80}")
         result = run_experiment(
             name,
             experiment,
             global_cfg,
+            config,
             resume=resume,
             evaluate=evaluate,
             fail_on_missing_data=fail_on_missing_data,
