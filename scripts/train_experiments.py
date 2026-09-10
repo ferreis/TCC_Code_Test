@@ -25,23 +25,28 @@ GROUP_CHOICES = [
 ]
 
 
-def _refresh_analysis_bundle(config_path: str, output_dir: str) -> None:
+def _resolve(value: str) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else (REPO_ROOT / path).resolve()
+
+
+def _refresh_analysis_bundle(config_path: str, runs_root: str, output_dir: str) -> None:
     cmd = [
         sys.executable,
         str(REPO_ROOT / "scripts" / "export_analysis_bundle.py"),
         "--config",
         config_path,
         "--runs-root",
-        str(REPO_ROOT / "workspace" / "training_runs"),
+        str(_resolve(runs_root)),
         "--output",
-        str((REPO_ROOT / output_dir).resolve()) if not Path(output_dir).is_absolute() else output_dir,
+        str(_resolve(output_dir)),
     ]
     print("\nAtualizando pacote para TCC_Analise...")
     result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
         print("[AVISO] Treino concluído, mas a exportação para análise falhou.")
         return
-    print(f"Pacote atualizado em: {output_dir}")
+    print(f"Pacote atualizado em: {_resolve(output_dir)}")
 
 
 def main() -> None:
@@ -67,7 +72,6 @@ def main() -> None:
     runtime = load_runtime_config(args.runtime_config)
     runtime_plan_path = REPO_ROOT / "workspace" / "training_plan_runtime.yaml"
 
-    # Primeira materialização sem copiar datasets: resolve modelos, caminhos e parâmetros.
     runtime_plan_path, plan_cfg = materialize_training_plan(
         runtime,
         profile=args.profile,
@@ -87,12 +91,7 @@ def main() -> None:
             )
         return
 
-    if args.only:
-        selected = list(args.only)
-    else:
-        selected = list(list_experiments(plan_cfg, args.group).keys())
-
-    # Na execução real, o perfil pode copiar apenas os datasets selecionados para SSD local.
+    selected = list(args.only) if args.only else list(list_experiments(plan_cfg, args.group).keys())
     runtime_plan_path, _ = materialize_training_plan(
         runtime,
         profile=args.profile,
@@ -113,8 +112,12 @@ def main() -> None:
     )
 
     if not args.dry_run:
-        output_dir = str((runtime.get("paths", {}) or {}).get("analysis_export", "exports/TCC_Analise_models"))
-        _refresh_analysis_bundle(str(runtime_plan_path), output_dir)
+        paths = runtime.get("paths", {}) or {}
+        _refresh_analysis_bundle(
+            str(runtime_plan_path),
+            str(paths.get("training_project", "workspace/training_runs")),
+            str(paths.get("analysis_export", "exports/TCC_Analise_models")),
+        )
 
 
 if __name__ == "__main__":
