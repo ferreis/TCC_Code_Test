@@ -50,13 +50,7 @@ def _configured_split_value(cfg: dict[str, Any], split: str) -> str | None:
 
 
 def _resolve_dataset_split(data_yaml: Path, cfg: dict[str, Any], split: str) -> Path | None:
-    """Resolve um split YOLO e tolera exports Roboflow com ../train/images.
-
-    Alguns exports do Roboflow gravam caminhos como ``../train/images`` no
-    ``data.yaml`` mesmo quando as pastas ``train/valid/test`` estão ao lado do
-    próprio YAML. Ultralytics costuma conseguir contornar isso em alguns fluxos,
-    mas ferramentas próprias precisam resolver o layout real no disco.
-    """
+    """Resolve um split YOLO e tolera exports Roboflow com ../train/images."""
     raw_value = _configured_split_value(cfg, split)
     if raw_value is None:
         return None
@@ -70,14 +64,11 @@ def _resolve_dataset_split(data_yaml: Path, cfg: dict[str, Any], split: str) -> 
     if primary.exists():
         return primary
 
-    # Fallback 1: reaproveita apenas o sufixo sem os "..". Ex.:
-    # ../train/images -> <pasta-do-data.yaml>/train/images
     clean_parts = [part for part in configured.parts if part not in {'.', '..', '/'}]
     candidates: list[Path] = []
     if clean_parts:
         candidates.append((data_yaml.parent / Path(*clean_parts)).resolve())
 
-    # Fallback 2: convenção YOLO/Roboflow mais comum ao lado do data.yaml.
     for alias in _SPLIT_ALIASES.get(split, (split,)):
         candidates.append((data_yaml.parent / alias / 'images').resolve())
         candidates.append((data_yaml.parent / alias).resolve())
@@ -90,7 +81,6 @@ def _resolve_dataset_split(data_yaml: Path, cfg: dict[str, Any], split: str) -> 
         if candidate.exists():
             return candidate
 
-    # Retorna o caminho primário para que a mensagem de erro continue útil.
     return primary
 
 
@@ -141,11 +131,59 @@ def _labels_dir_from_images(images_dir: Path) -> Path:
     return images_dir.parent / 'labels'
 
 
-def _read_yolo_boxes(label_path: Path) -> tuple[list[list[float]], list[int]]:
+def _sanitize_yolo_box(
+    cx: float,
+    cy: float,
+    bw: float,
+    bh: float,
+    *,
+    max_overflow: float = 0.02,
+) -> tuple[list[float] | None, str]:
+    """Normaliza uma box YOLO antes de passá-la ao Albumentations.
+
+    Roboflow/YOLO pode produzir boxes encostadas na borda que, por arredondamento,
+    resultam em x_min/y_min como -0.000003. Albumentations valida estritamente o
+    intervalo [0, 1] e aborta. Corrigimos apenas boxes que ainda intersectam a
+    imagem e cujo excesso é pequeno (até 2% por padrão). Boxes claramente
+    corrompidas são descartadas e contabilizadas no manifesto.
+    """
+    values = np.asarray([cx, cy, bw, bh], dtype=np.float64)
+    if not np.isfinite(values).all() or bw <= 0.0 or bh <= 0.0:
+        return None, 'invalid'
+
+    x1 = cx - bw / 2.0
+    y1 = cy - bh / 2.0
+    x2 = cx + bw / 2.0
+    y2 = cy + bh / 2.0
+
+    overflow = max(0.0, -x1, -y1, x2 - 1.0, y2 - 1.0)
+    if overflow > max_overflow:
+        return None, 'invalid'
+
+    x1c = min(1.0, max(0.0, x1))
+    y1c = min(1.0, max(0.0, y1))
+    x2c = min(1.0, max(0.0, x2))
+    y2c = min(1.0, max(0.0, y2))
+    if x2c <= x1c or y2c <= y1c:
+        return None, 'invalid'
+
+    sanitized = [
+        (x1c + x2c) / 2.0,
+        (y1c + y2c) / 2.0,
+        x2c - x1c,
+        y2c - y1c,
+    ]
+    corrected = any(abs(a - b) > 1e-9 for a, b in zip(sanitized, [cx, cy, bw, bh]))
+    return sanitized, 'corrected' if corrected else 'ok'
+
+
+def _read_yolo_boxes(label_path: Path) -> tuple[list[list[float]], list[int], dict[str, int]]:
     boxes: list[list[float]] = []
     classes: list[int] = []
+    stats = {'total': 0, 'corrected': 0, 'skipped_invalid': 0}
     if not label_path.exists():
-        return boxes, classes
+        return boxes, classes, stats
+
     for line_no, raw in enumerate(label_path.read_text(encoding='utf-8').splitlines(), start=1):
         line = raw.strip()
         if not line:
@@ -156,18 +194,29 @@ def _read_yolo_boxes(label_path: Path) -> tuple[list[list[float]], list[int]]:
                 f'{label_path}:{line_no}: esperado label YOLO detection com 5 colunas; '
                 f'encontradas {len(parts)}. Para segmentação use o pipeline de máscaras.'
             )
+        stats['total'] += 1
         cid = int(float(parts[0]))
         cx, cy, bw, bh = map(float, parts[1:])
-        boxes.append([cx, cy, bw, bh])
+        sanitized, status = _sanitize_yolo_box(cx, cy, bw, bh)
+        if sanitized is None:
+            stats['skipped_invalid'] += 1
+            continue
+        if status == 'corrected':
+            stats['corrected'] += 1
+        boxes.append(sanitized)
         classes.append(cid)
-    return boxes, classes
+    return boxes, classes, stats
 
 
 def _write_yolo_boxes(path: Path, boxes: list[list[float]], classes: list[int]) -> None:
     lines = []
-    for cid, (cx, cy, bw, bh) in zip(classes, boxes):
-        if bw <= 0 or bh <= 0:
+    for cid, box in zip(classes, boxes):
+        if len(box) < 4:
             continue
+        sanitized, _ = _sanitize_yolo_box(*map(float, box[:4]), max_overflow=0.05)
+        if sanitized is None:
+            continue
+        cx, cy, bw, bh = sanitized
         lines.append(f'{int(cid)} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}')
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('\n'.join(lines), encoding='utf-8')
@@ -319,8 +368,6 @@ def augment_yolo_detection_dataset(
     if train_images is None or not train_images.exists():
         raise FileNotFoundError(f'Split train não encontrado: {train_images}')
 
-    # Só mexe na pasta de saída depois de validar a origem. Isso evita deixar
-    # diretórios vazios quando um data.yaml possui caminho inválido.
     if output_dir.exists():
         if not overwrite:
             if any(output_dir.iterdir()):
@@ -350,19 +397,22 @@ def augment_yolo_detection_dataset(
         copied_test = _copy_split(test_images, output_dir, 'test')
 
     generated = 0
+    bbox_stats = {'total': 0, 'corrected': 0, 'skipped_invalid': 0}
     mosaic_pool: list[tuple[np.ndarray, list[list[float]], list[int]]] = []
     for image_path, label_path, relative in train_pairs:
         image_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image_bgr is None:
             raise ValueError(f'Falha lendo imagem: {image_path}')
         image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        boxes, classes = _read_yolo_boxes(label_path)
+        boxes, classes, current_stats = _read_yolo_boxes(label_path)
+        for key in bbox_stats:
+            bbox_stats[key] += current_stats[key]
         mosaic_pool.append((image, boxes, classes))
         stem = _safe_stem(relative)
         for copy_idx in range(copies_per_image):
             result = transform(image=image, bboxes=boxes, class_labels=classes)
             aug_image = result['image']
-            aug_boxes = [list(map(float, box)) for box in result['bboxes']]
+            aug_boxes = [list(map(float, box[:4])) for box in result['bboxes']]
             aug_classes = [int(x) for x in result['class_labels']]
             out_stem = f'{stem}_aug_{copy_idx + 1:02d}'
             Image.fromarray(aug_image).save(output_dir / 'train' / 'images' / f'{out_stem}.jpg', quality=95)
@@ -410,6 +460,9 @@ def augment_yolo_detection_dataset(
         'final_train_images': copied_train + generated + mosaics,
         'validation_images_unchanged': copied_val,
         'test_images_unchanged': copied_test,
+        'bbox_labels_total': bbox_stats['total'],
+        'bbox_labels_corrected_at_border': bbox_stats['corrected'],
+        'bbox_labels_skipped_invalid': bbox_stats['skipped_invalid'],
         'copies_per_image': copies_per_image,
         'size': size,
         'aggressive': aggressive,
