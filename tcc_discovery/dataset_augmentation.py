@@ -4,8 +4,9 @@ import json
 import random
 import re
 import shutil
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import albumentations as A
 import cv2
@@ -14,6 +15,8 @@ import yaml
 from PIL import Image
 
 IMAGE_SUFFIXES = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'}
+ProgressCallback = Callable[[int, int, str], None]
+LogCallback = Callable[[str], None]
 
 DEFAULT_AUGMENTATIONS: dict[str, bool] = {
     'horizontal_flip': True,
@@ -139,14 +142,7 @@ def _sanitize_yolo_box(
     *,
     max_overflow: float = 0.02,
 ) -> tuple[list[float] | None, str]:
-    """Normaliza uma box YOLO antes de passá-la ao Albumentations.
-
-    Roboflow/YOLO pode produzir boxes encostadas na borda que, por arredondamento,
-    resultam em x_min/y_min como -0.000003. Albumentations valida estritamente o
-    intervalo [0, 1] e aborta. Corrigimos apenas boxes que ainda intersectam a
-    imagem e cujo excesso é pequeno (até 2% por padrão). Boxes claramente
-    corrompidas são descartadas e contabilizadas no manifesto.
-    """
+    """Normaliza uma box YOLO antes de passá-la ao Albumentations."""
     values = np.asarray([cx, cy, bw, bh], dtype=np.float64)
     if not np.isfinite(values).all() or bw <= 0.0 or bh <= 0.0:
         return None, 'invalid'
@@ -302,9 +298,13 @@ def _iter_pairs(images_dir: Path) -> list[tuple[Path, Path, Path]]:
     return pairs
 
 
-def _copy_split(images_dir: Path, output_root: Path, split_name: str) -> int:
-    pairs = _iter_pairs(images_dir)
-    for image_path, label_path, relative in pairs:
+def _copy_pairs(
+    pairs: list[tuple[Path, Path, Path]],
+    output_root: Path,
+    split_name: str,
+    advance: Callable[[str], None],
+) -> int:
+    for index, (image_path, label_path, relative) in enumerate(pairs, start=1):
         out_image = output_root / split_name / 'images' / relative
         out_label = output_root / split_name / 'labels' / relative.with_suffix('.txt')
         out_image.parent.mkdir(parents=True, exist_ok=True)
@@ -314,6 +314,7 @@ def _copy_split(images_dir: Path, output_root: Path, split_name: str) -> int:
             shutil.copy2(label_path, out_label)
         else:
             out_label.write_text('', encoding='utf-8')
+        advance(f'Copiando {split_name}: {index}/{len(pairs)}')
     return len(pairs)
 
 
@@ -355,7 +356,10 @@ def augment_yolo_detection_dataset(
     enabled_augmentations: dict[str, bool] | None = None,
     seed: int = 42,
     overwrite: bool = False,
+    progress_cb: ProgressCallback | None = None,
+    log_cb: LogCallback | None = None,
 ) -> dict[str, Any]:
+    started = time.monotonic()
     data_yaml = Path(data_yaml).expanduser().resolve()
     output_dir = Path(output_dir).expanduser().resolve()
     if not data_yaml.exists():
@@ -368,12 +372,46 @@ def augment_yolo_detection_dataset(
     if train_images is None or not train_images.exists():
         raise FileNotFoundError(f'Split train não encontrado: {train_images}')
 
+    train_pairs = _iter_pairs(train_images)
+    if not train_pairs:
+        raise ValueError(f'Nenhuma imagem encontrada em {train_images}')
+    val_pairs = _iter_pairs(val_images) if preserve_validation and val_images is not None and val_images.exists() else []
+    test_pairs = _iter_pairs(test_images) if preserve_test and test_images is not None and test_images.exists() else []
+    planned_mosaics = len(train_pairs) // 4 if include_mosaic and len(train_pairs) >= 4 else 0
+    total_work = (
+        (len(train_pairs) if include_original_train else 0)
+        + len(val_pairs)
+        + len(test_pairs)
+        + len(train_pairs) * int(copies_per_image)
+        + planned_mosaics
+    )
+    total_work = max(1, total_work)
+    done = 0
+    report_every = max(1, total_work // 400)
+
+    def log(message: str) -> None:
+        if log_cb is not None:
+            log_cb(message)
+
+    def report(message: str, *, force: bool = False) -> None:
+        if progress_cb is not None and (force or done <= 1 or done >= total_work or done % report_every == 0):
+            progress_cb(done, total_work, message)
+
+    def advance(message: str) -> None:
+        nonlocal done
+        done += 1
+        report(message)
+
+    log(f'Dataset validado: {len(train_pairs)} train, {len(val_pairs)} validation, {len(test_pairs)} test.')
+    report('Preparando saída...', force=True)
+
     if output_dir.exists():
         if not overwrite:
             if any(output_dir.iterdir()):
                 raise FileExistsError(f'Saída já existe: {output_dir}. Use overwrite=True para recriar.')
             shutil.rmtree(output_dir)
         else:
+            log(f'Recriando pasta de saída: {output_dir}')
             shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -384,22 +422,26 @@ def augment_yolo_detection_dataset(
     rng = random.Random(seed)
     np.random.seed(seed)
 
-    train_pairs = _iter_pairs(train_images)
-    if not train_pairs:
-        raise ValueError(f'Nenhuma imagem encontrada em {train_images}')
+    copied_train = 0
+    if include_original_train:
+        log('Copiando imagens originais de TRAIN...')
+        copied_train = _copy_pairs(train_pairs, output_dir, 'train', advance)
 
-    copied_train = _copy_split(train_images, output_dir, 'train') if include_original_train else 0
     copied_val = 0
+    if val_pairs:
+        log('Copiando VALID sem augmentation...')
+        copied_val = _copy_pairs(val_pairs, output_dir, 'valid', advance)
+
     copied_test = 0
-    if preserve_validation and val_images is not None and val_images.exists():
-        copied_val = _copy_split(val_images, output_dir, 'valid')
-    if preserve_test and test_images is not None and test_images.exists():
-        copied_test = _copy_split(test_images, output_dir, 'test')
+    if test_pairs:
+        log('Copiando TEST sem augmentation...')
+        copied_test = _copy_pairs(test_pairs, output_dir, 'test', advance)
 
     generated = 0
     bbox_stats = {'total': 0, 'corrected': 0, 'skipped_invalid': 0}
     mosaic_pool: list[tuple[np.ndarray, list[list[float]], list[int]]] = []
-    for image_path, label_path, relative in train_pairs:
+    log(f'Gerando {len(train_pairs) * int(copies_per_image)} imagens aumentadas...')
+    for image_number, (image_path, label_path, relative) in enumerate(train_pairs, start=1):
         image_bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image_bgr is None:
             raise ValueError(f'Falha lendo imagem: {image_path}')
@@ -418,9 +460,14 @@ def augment_yolo_detection_dataset(
             Image.fromarray(aug_image).save(output_dir / 'train' / 'images' / f'{out_stem}.jpg', quality=95)
             _write_yolo_boxes(output_dir / 'train' / 'labels' / f'{out_stem}.txt', aug_boxes, aug_classes)
             generated += 1
+            advance(
+                f'Augmentation: imagem {image_number}/{len(train_pairs)} · '
+                f'cópia {copy_idx + 1}/{copies_per_image}'
+            )
 
     mosaics = 0
-    if include_mosaic and len(mosaic_pool) >= 4:
+    if planned_mosaics:
+        log(f'Gerando {planned_mosaics} mosaicos 2x2...')
         order = mosaic_pool[:]
         rng.shuffle(order)
         for start in range(0, len(order) - 3, 4):
@@ -429,6 +476,7 @@ def augment_yolo_detection_dataset(
             Image.fromarray(image).save(output_dir / 'train' / 'images' / f'{out_stem}.jpg', quality=95)
             _write_yolo_boxes(output_dir / 'train' / 'labels' / f'{out_stem}.txt', boxes, classes)
             mosaics += 1
+            advance(f'Mosaicos: {mosaics}/{planned_mosaics}')
 
     names = cfg.get('names', {})
     output_cfg: dict[str, Any] = {
@@ -447,6 +495,7 @@ def augment_yolo_detection_dataset(
         encoding='utf-8',
     )
 
+    duration_seconds = round(time.monotonic() - started, 3)
     manifest = {
         'source_data_yaml': str(data_yaml),
         'output_data_yaml': str(output_dir / 'data.yaml'),
@@ -468,11 +517,15 @@ def augment_yolo_detection_dataset(
         'aggressive': aggressive,
         'enabled_augmentations': enabled,
         'seed': seed,
+        'duration_seconds': duration_seconds,
     }
     (output_dir / 'augmentation_manifest.json').write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
+    done = total_work
+    report('Concluído.', force=True)
+    log(f'Concluído em {duration_seconds:.1f}s. Train final: {manifest["final_train_images"]} imagens.')
     return manifest
 
 
