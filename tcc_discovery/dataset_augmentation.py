@@ -31,8 +31,14 @@ DEFAULT_AUGMENTATIONS: dict[str, bool] = {
     'coarse_dropout': True,
 }
 
+_SPLIT_ALIASES: dict[str, tuple[str, ...]] = {
+    'train': ('train',),
+    'val': ('valid', 'val'),
+    'test': ('test',),
+}
 
-def _resolve_dataset_split(data_yaml: Path, cfg: dict[str, Any], split: str) -> Path | None:
+
+def _configured_split_value(cfg: dict[str, Any], split: str) -> str | None:
     value = cfg.get(split)
     if not value:
         return None
@@ -40,13 +46,90 @@ def _resolve_dataset_split(data_yaml: Path, cfg: dict[str, Any], split: str) -> 
         if len(value) != 1:
             raise ValueError(f'{split}: listas com múltiplos caminhos ainda não são suportadas.')
         value = value[0]
+    return str(value)
+
+
+def _resolve_dataset_split(data_yaml: Path, cfg: dict[str, Any], split: str) -> Path | None:
+    """Resolve um split YOLO e tolera exports Roboflow com ../train/images.
+
+    Alguns exports do Roboflow gravam caminhos como ``../train/images`` no
+    ``data.yaml`` mesmo quando as pastas ``train/valid/test`` estão ao lado do
+    próprio YAML. Ultralytics costuma conseguir contornar isso em alguns fluxos,
+    mas ferramentas próprias precisam resolver o layout real no disco.
+    """
+    raw_value = _configured_split_value(cfg, split)
+    if raw_value is None:
+        return None
+
     root = Path(str(cfg.get('path', '.'))).expanduser()
     if not root.is_absolute():
         root = (data_yaml.parent / root).resolve()
-    path = Path(str(value)).expanduser()
-    if not path.is_absolute():
-        path = (root / path).resolve()
-    return path
+
+    configured = Path(raw_value).expanduser()
+    primary = configured if configured.is_absolute() else (root / configured).resolve()
+    if primary.exists():
+        return primary
+
+    # Fallback 1: reaproveita apenas o sufixo sem os "..". Ex.:
+    # ../train/images -> <pasta-do-data.yaml>/train/images
+    clean_parts = [part for part in configured.parts if part not in {'.', '..', '/'}]
+    candidates: list[Path] = []
+    if clean_parts:
+        candidates.append((data_yaml.parent / Path(*clean_parts)).resolve())
+
+    # Fallback 2: convenção YOLO/Roboflow mais comum ao lado do data.yaml.
+    for alias in _SPLIT_ALIASES.get(split, (split,)):
+        candidates.append((data_yaml.parent / alias / 'images').resolve())
+        candidates.append((data_yaml.parent / alias).resolve())
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists():
+            return candidate
+
+    # Retorna o caminho primário para que a mensagem de erro continue útil.
+    return primary
+
+
+def resolve_yolo_split(data_yaml: str | Path, split: str) -> Path | None:
+    data_yaml = Path(data_yaml).expanduser().resolve()
+    if not data_yaml.exists():
+        raise FileNotFoundError(data_yaml)
+    cfg = yaml.safe_load(data_yaml.read_text(encoding='utf-8')) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError(f'data.yaml inválido: {data_yaml}')
+    return _resolve_dataset_split(data_yaml, cfg, split)
+
+
+def _count_images(path: Path | None) -> int:
+    if path is None or not path.exists():
+        return 0
+    return sum(1 for p in path.rglob('*') if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def inspect_yolo_detection_dataset(data_yaml: str | Path) -> dict[str, Any]:
+    data_yaml = Path(data_yaml).expanduser().resolve()
+    if not data_yaml.exists():
+        raise FileNotFoundError(data_yaml)
+    cfg = yaml.safe_load(data_yaml.read_text(encoding='utf-8')) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError(f'data.yaml inválido: {data_yaml}')
+    resolved = {
+        'train': _resolve_dataset_split(data_yaml, cfg, 'train'),
+        'val': _resolve_dataset_split(data_yaml, cfg, 'val'),
+        'test': _resolve_dataset_split(data_yaml, cfg, 'test'),
+    }
+    return {
+        'data_yaml': str(data_yaml),
+        'configured': {key: _configured_split_value(cfg, key) for key in ('train', 'val', 'test')},
+        'resolved': {key: str(value) if value else None for key, value in resolved.items()},
+        'exists': {key: bool(value and value.exists()) for key, value in resolved.items()},
+        'images': {key: _count_images(value) for key, value in resolved.items()},
+        'names': cfg.get('names', {}),
+    }
 
 
 def _labels_dir_from_images(images_dir: Path) -> Path:
@@ -228,11 +311,6 @@ def augment_yolo_detection_dataset(
     output_dir = Path(output_dir).expanduser().resolve()
     if not data_yaml.exists():
         raise FileNotFoundError(data_yaml)
-    if output_dir.exists():
-        if not overwrite:
-            raise FileExistsError(f'Saída já existe: {output_dir}. Use overwrite=True para recriar.')
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = yaml.safe_load(data_yaml.read_text(encoding='utf-8')) or {}
     train_images = _resolve_dataset_split(data_yaml, cfg, 'train')
@@ -240,6 +318,17 @@ def augment_yolo_detection_dataset(
     test_images = _resolve_dataset_split(data_yaml, cfg, 'test')
     if train_images is None or not train_images.exists():
         raise FileNotFoundError(f'Split train não encontrado: {train_images}')
+
+    # Só mexe na pasta de saída depois de validar a origem. Isso evita deixar
+    # diretórios vazios quando um data.yaml possui caminho inválido.
+    if output_dir.exists():
+        if not overwrite:
+            if any(output_dir.iterdir()):
+                raise FileExistsError(f'Saída já existe: {output_dir}. Use overwrite=True para recriar.')
+            shutil.rmtree(output_dir)
+        else:
+            shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     enabled = dict(DEFAULT_AUGMENTATIONS)
     if enabled_augmentations:
@@ -311,6 +400,9 @@ def augment_yolo_detection_dataset(
     manifest = {
         'source_data_yaml': str(data_yaml),
         'output_data_yaml': str(output_dir / 'data.yaml'),
+        'resolved_train': str(train_images),
+        'resolved_validation': str(val_images) if val_images else None,
+        'resolved_test': str(test_images) if test_images else None,
         'source_train_images': len(train_pairs),
         'copied_original_train': copied_train,
         'generated_augmented_train': generated,
