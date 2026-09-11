@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import time
+from collections import deque
 from pathlib import Path
 
 import streamlit as st
@@ -132,6 +134,39 @@ if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
         output = Path(output_dir)
         if not output.is_absolute():
             output = (REPO_ROOT / output).resolve()
+
+        st.markdown('#### Progresso')
+        progress_bar = st.progress(0.0, text='Preparando augmentation...')
+        time_box = st.empty()
+        terminal_box = st.empty()
+        terminal_lines: deque[str] = deque(maxlen=18)
+        started = time.monotonic()
+
+        def fmt_seconds(value: float) -> str:
+            value = max(0, int(round(value)))
+            hours, rem = divmod(value, 3600)
+            minutes, seconds = divmod(rem, 60)
+            if hours:
+                return f'{hours:02d}:{minutes:02d}:{seconds:02d}'
+            return f'{minutes:02d}:{seconds:02d}'
+
+        def log_cb(message: str) -> None:
+            elapsed = time.monotonic() - started
+            terminal_lines.append(f'[{fmt_seconds(elapsed)}] {message}')
+            terminal_box.code('\n'.join(terminal_lines), language='text')
+
+        def progress_cb(done: int, total: int, message: str) -> None:
+            ratio = min(1.0, max(0.0, done / total if total else 0.0))
+            elapsed = time.monotonic() - started
+            eta = (elapsed / ratio - elapsed) if ratio > 0 else 0.0
+            progress_bar.progress(ratio, text=f'{ratio * 100:5.1f}% · {message}')
+            eta_text = fmt_seconds(eta) if ratio > 0 else 'calculando...'
+            time_box.caption(
+                f'Decorrido: {fmt_seconds(elapsed)} · ETA aproximada: {eta_text} · '
+                f'Operações: {done}/{total}'
+            )
+
+        log_cb('Iniciando processamento. A tela será atualizada automaticamente; não é necessário clicar em atualizar.')
         result = augment_yolo_detection_dataset(
             source,
             output,
@@ -145,7 +180,12 @@ if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
             enabled_augmentations=enabled,
             seed=int(seed),
             overwrite=bool(overwrite),
+            progress_cb=progress_cb,
+            log_cb=log_cb,
         )
+        progress_bar.progress(1.0, text='100% · Augmentation concluída')
+        time_box.caption(f'Tempo total: {fmt_seconds(float(result.get("duration_seconds", 0.0)))}')
+
         output_yaml = str(output / 'data.yaml')
         add_entry('augmentation_outputs', dataset_name, str(output))
         add_entry('datasets', dataset_name, output_yaml, metadata={'source': str(source)})
