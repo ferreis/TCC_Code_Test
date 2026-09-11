@@ -157,6 +157,22 @@ if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
         m4.metric('Train final', result['final_train_images'])
         st.write('Validation preservado:', result['validation_images_unchanged'])
         st.write('Test preservado:', result['test_images_unchanged'])
+
+        b1, b2, b3 = st.columns(3)
+        b1.metric('Boxes lidas no train', result.get('bbox_labels_total', 0))
+        b2.metric('Boxes corrigidas na borda', result.get('bbox_labels_corrected_at_border', 0))
+        b3.metric('Boxes inválidas ignoradas', result.get('bbox_labels_skipped_invalid', 0))
+        if result.get('bbox_labels_corrected_at_border', 0):
+            st.info(
+                'Algumas boxes encostavam na borda da imagem e tinham pequenas diferenças de arredondamento. '
+                'Elas foram limitadas a [0,1] antes da augmentation.'
+            )
+        if result.get('bbox_labels_skipped_invalid', 0):
+            st.warning(
+                'Foram encontradas boxes claramente inválidas e elas não foram usadas nas imagens aumentadas. '
+                'A quantidade fica registrada em augmentation_manifest.json.'
+            )
+
         st.code(output_yaml)
         st.session_state['last_augmented_yaml'] = output_yaml
     except Exception as exc:
