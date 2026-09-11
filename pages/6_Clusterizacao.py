@@ -10,7 +10,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tcc_discovery.box_clustering import BoxClusteringConfig, run_box_clustering
-from tcc_discovery.dataset_augmentation import discover_yolo_datasets
+from tcc_discovery.dataset_augmentation import discover_yolo_datasets, resolve_yolo_split
 from tcc_discovery.workspace_registry import add_entry, list_entries
 
 st.set_page_config(page_title='TCC - Clusterização', layout='wide')
@@ -29,20 +29,16 @@ if selected == 'Digitar caminho...':
     data_yaml = Path(st.text_input('Caminho do data.yaml', 'data/roboflow/data.yaml'))
 else:
     data_yaml = Path(selected)
+if not data_yaml.is_absolute():
+    data_yaml = (REPO_ROOT / data_yaml).resolve()
 
 split_dir = data_yaml.parent / 'train'
-if data_yaml.exists():
-    import yaml
-    cfg = yaml.safe_load(data_yaml.read_text(encoding='utf-8')) or {}
-    raw_train = cfg.get('train')
-    if isinstance(raw_train, str):
-        root = Path(str(cfg.get('path', '.')))
-        if not root.is_absolute():
-            root = (data_yaml.parent / root).resolve()
-        train_images = Path(raw_train)
-        if not train_images.is_absolute():
-            train_images = (root / train_images).resolve()
+try:
+    train_images = resolve_yolo_split(data_yaml, 'train') if data_yaml.exists() else None
+    if train_images is not None:
         split_dir = train_images.parent if train_images.name == 'images' else train_images
+except Exception as exc:
+    st.warning(f'Não foi possível resolver automaticamente o split train: {exc}')
 
 st.text_input('Split usado para clusterização', value=str(split_dir), disabled=True)
 
@@ -71,6 +67,8 @@ if st.button('Executar clusterização', type='primary'):
     try:
         if not data_yaml.exists():
             raise FileNotFoundError(data_yaml)
+        if not split_dir.exists():
+            raise FileNotFoundError(f'Split train não encontrado: {split_dir}')
         add_entry('cluster_projects', workspace_name, workspace_path, metadata={'data_yaml': str(data_yaml)})
         cfg = BoxClusteringConfig(
             context_scale=float(context_scale),
