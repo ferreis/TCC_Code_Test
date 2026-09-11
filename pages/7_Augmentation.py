@@ -13,6 +13,7 @@ from tcc_discovery.dataset_augmentation import (
     DEFAULT_AUGMENTATIONS,
     augment_yolo_detection_dataset,
     discover_yolo_datasets,
+    inspect_yolo_detection_dataset,
 )
 from tcc_discovery.runtime_config import load_runtime_config, save_runtime_config
 from tcc_discovery.workspace_registry import add_entry, list_entries
@@ -46,6 +47,34 @@ if choice == 'Digitar/importar caminho...':
     source_yaml = st.text_input('Caminho do data.yaml', 'data/roboflow/data.yaml')
 else:
     source_yaml = source_options[labels.index(choice)][1]
+
+source_preview = Path(source_yaml)
+if not source_preview.is_absolute():
+    source_preview = (REPO_ROOT / source_preview).resolve()
+
+source_ok = False
+try:
+    dataset_info = inspect_yolo_detection_dataset(source_preview)
+    source_ok = bool(dataset_info['exists']['train'])
+    st.markdown('#### Dataset detectado')
+    m1, m2, m3 = st.columns(3)
+    m1.metric('Train', dataset_info['images']['train'])
+    m2.metric('Validation', dataset_info['images']['val'])
+    m3.metric('Test', dataset_info['images']['test'])
+    with st.expander('Ver caminhos resolvidos'):
+        st.write('data.yaml:', dataset_info['data_yaml'])
+        st.write('TRAIN:', dataset_info['resolved']['train'])
+        st.write('VALID:', dataset_info['resolved']['val'])
+        st.write('TEST:', dataset_info['resolved']['test'])
+        st.caption(
+            'Exports Roboflow com caminhos como ../train/images são corrigidos automaticamente quando '
+            'as pastas train/valid/test estão ao lado do data.yaml.'
+        )
+    if not source_ok:
+        st.error('O split TRAIN ainda não pôde ser localizado. Confira o data.yaml e a estrutura de pastas.')
+except Exception as exc:
+    dataset_info = None
+    st.error(f'Não foi possível validar o dataset selecionado: {exc}')
 
 out_entries = list_entries('augmentation_outputs')
 out_labels = [f"{e['name']} — {e['value']}" for e in out_entries]
@@ -95,7 +124,7 @@ a.checkbox('Manter imagens originais de train', value=True, disabled=True)
 b.checkbox('Preservar validation sem augmentation', value=True, disabled=True)
 c.checkbox('Preservar test sem augmentation', value=True, disabled=True)
 
-if st.button('Gerar dataset aumentado', type='primary'):
+if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
     try:
         source = Path(source_yaml)
         if not source.is_absolute():
