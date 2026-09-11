@@ -480,7 +480,7 @@ def augment_yolo_detection_dataset(
 
     names = cfg.get('names', {})
     output_cfg: dict[str, Any] = {
-        'path': '.',
+        # Without "path", Ultralytics resolves splits relative to this YAML.
         'train': 'train/images',
         'names': names,
     }

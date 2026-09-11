@@ -1,20 +1,14 @@
-# Configuração ÚNICA compartilhada por terminal, Streamlit e Google Colab.
-# Segredos reais não ficam neste arquivo; use .env local ou Colab Secrets.
 version: 1
-
 default_profile: local
-
 paths:
   training_plan: configs/training_experiments.yaml
   training_project: workspace/training_runs
   analysis_export: exports/TCC_Analise_models
-
 models:
   detect: yolo26n.pt
   segment: yolo26n-seg.pt
-
 datasets:
-  det_general: data/roboflow/data.yaml
+  det_general: data/augmented/roboflow_augmented_v1/data.yaml
   seg_general: data/segmentation/data.yaml
   det_lora_01: data/specialists/detection/lora_01/data.yaml
   det_lora_02: data/specialists/detection/lora_02/data.yaml
@@ -26,7 +20,6 @@ datasets:
   seg_lora_03: data/specialists/segmentation/lora_03/data.yaml
   seg_lora_04: data/specialists/segmentation/lora_04/data.yaml
   seg_lora_05: data/specialists/segmentation/lora_05/data.yaml
-
 training:
   epochs: 100
   imgsz: 640
@@ -41,31 +34,25 @@ training:
   plots: true
   verbose: true
   eval_split: test
-
 smoke:
   epochs: 3
   imgsz: 640
-
 lora:
   r: 16
   alpha: 32
-  dropout: 0.10
+  dropout: 0.1
   gradient_checkpointing: true
   include_head: true
-
 profiles:
   local:
-    # Perfil inicial conservador para GPU ~6 GB (ex.: GTX 1660).
     batch: 8
-    workers: 2
+    workers: 4
     cache: disk
     use_local_dataset_cache: false
     local_data_root: workspace/local_training_data
     refresh_local_dataset_cache: false
     yolo_master_dir: .yolo-master
-
   colab:
-    # Perfil inicial para Tesla T4 ~15 GB.
     batch: 32
     workers: 4
     cache: disk
@@ -74,7 +61,6 @@ profiles:
     refresh_local_dataset_cache: false
     yolo_master_dir: /content/YOLO-Master
     persist_root: /content/drive/MyDrive/TCC_Code_Test_runtime
-
 roboflow:
   workspace: rafael-fernando-dos-reis-mecabo
   format: yolo26
@@ -85,12 +71,36 @@ roboflow:
     download: true
     overwrite: false
   specialists:
-    det_lora_01: {project: COLOQUE_SLUG_LORA_01, version: 1, output: data/specialists/detection/lora_01, download: false, overwrite: false}
-    det_lora_02: {project: COLOQUE_SLUG_LORA_02, version: 1, output: data/specialists/detection/lora_02, download: false, overwrite: false}
-    det_lora_03: {project: COLOQUE_SLUG_LORA_03, version: 1, output: data/specialists/detection/lora_03, download: false, overwrite: false}
-    det_lora_04: {project: COLOQUE_SLUG_LORA_04, version: 1, output: data/specialists/detection/lora_04, download: false, overwrite: false}
-    det_lora_05: {project: COLOQUE_SLUG_LORA_05, version: 1, output: data/specialists/detection/lora_05, download: false, overwrite: false}
-
+    det_lora_01:
+      project: COLOQUE_SLUG_LORA_01
+      version: 1
+      output: data/specialists/detection/lora_01
+      download: false
+      overwrite: false
+    det_lora_02:
+      project: COLOQUE_SLUG_LORA_02
+      version: 1
+      output: data/specialists/detection/lora_02
+      download: false
+      overwrite: false
+    det_lora_03:
+      project: COLOQUE_SLUG_LORA_03
+      version: 1
+      output: data/specialists/detection/lora_03
+      download: false
+      overwrite: false
+    det_lora_04:
+      project: COLOQUE_SLUG_LORA_04
+      version: 1
+      output: data/specialists/detection/lora_04
+      download: false
+      overwrite: false
+    det_lora_05:
+      project: COLOQUE_SLUG_LORA_05
+      version: 1
+      output: data/specialists/detection/lora_05
+      download: false
+      overwrite: false
 clustering:
   enabled: false
   source: data/roboflow/train
@@ -100,14 +110,11 @@ clustering:
   min_cluster_size: 6
   embedding_batch_size: 8
   cpu_fallback_on_oom: true
-
 sam:
   download: false
   checkpoint: weights/sam_vit_b_01ec64.pth
-
 streamlit:
   port: 8501
-
 secrets:
   github: GITHUB_TOKEN
   roboflow: ROBOFLOW_API_KEY

@@ -1,0 +1,814 @@
+{
+  "epoch": {
+    "aliases": [
+      "Epoch",
+      "Epochs",
+      "época",
+      "épocas"
+    ],
+    "text": "Uma passagem completa pelas imagens de treinamento. Com 100 epochs, o modelo pode percorrer o conjunto até 100 vezes; a parada antecipada pode encerrar antes."
+  },
+  "batch": {
+    "aliases": [
+      "Batch",
+      "auto-batch"
+    ],
+    "text": "Quantidade de imagens processadas por vez. Um batch de 8 usa até 8 imagens juntas; valores maiores normalmente exigem mais memória. No treino, -1 solicita ajuste automático quando suportado."
+  },
+  "learning_rate": {
+    "aliases": [
+      "learning rate",
+      "lr0",
+      "lrf",
+      "taxa de aprendizado"
+    ],
+    "text": "Controla o tamanho dos ajustes nos pesos do modelo. lr0 é a taxa inicial; lrf é o fator aplicado à taxa inicial no final. Valores altos podem tornar o treino instável."
+  },
+  "train": {
+    "aliases": [
+      "Train",
+      "treino",
+      "treinamento"
+    ],
+    "text": "Parte do dataset usada para ajustar os pesos do modelo. Nos contadores desta tela, o valor é a quantidade de imagens destinada ao aprendizado."
+  },
+  "validation": {
+    "aliases": [
+      "Validation",
+      "Valid",
+      "val",
+      "validação"
+    ],
+    "text": "Parte separada usada para acompanhar a qualidade durante o treino e selecionar o modelo. O contador indica imagens; elas não devem receber augmentation de treino."
+  },
+  "test": {
+    "aliases": [
+      "Test",
+      "teste"
+    ],
+    "text": "Parte reservada para a avaliação final em imagens não usadas para ajustar ou escolher o modelo. O contador indica quantas imagens estão disponíveis para essa avaliação."
+  },
+  "split": {
+    "aliases": [
+      "Split",
+      "Splits"
+    ],
+    "text": "Uma divisão do dataset: train, validation ou test. O campo indica qual parte dos dados será usada nesta operação."
+  },
+  "dataset": {
+    "aliases": [
+      "Dataset",
+      "Datasets"
+    ],
+    "text": "Conjunto de imagens e suas anotações. Aqui você escolhe a origem ou o destino dos dados usados na etapa."
+  },
+  "data_yaml": {
+    "aliases": [
+      "data.yaml",
+      "Dataset data.yaml desta etapa"
+    ],
+    "text": "Arquivo que informa ao YOLO onde estão as imagens de cada split e quais são as classes. O caminho deve apontar para o dataset desejado."
+  },
+  "augmentation": {
+    "aliases": [
+      "Augmentation",
+      "augmentations",
+      "aumentado",
+      "aumentadas"
+    ],
+    "text": "Cria variações das imagens, como rotações e mudanças de cor, para ampliar a diversidade do treino. Os contadores mostram as novas imagens geradas."
+  },
+  "aggressive": {
+    "aliases": [
+      "Augmentation agressiva"
+    ],
+    "text": "Ativa transformações mais intensas nas imagens. Pode aumentar a variedade, mas também afastar as imagens das condições reais de uso."
+  },
+  "confidence": {
+    "aliases": [
+      "Confidence",
+      "conf",
+      "confiança"
+    ],
+    "text": "Pontuação de confiança da detecção, de 0 a 1; não é garantia de acerto. Como filtro, 0,25 mantém detecções com pontuação de pelo menos 0,25. Na tabela, é a pontuação de cada objeto."
+  },
+  "iou": {
+    "aliases": [
+      "IoU"
+    ],
+    "text": "Mede a sobreposição entre duas regiões: 0 significa nenhuma e 1 significa coincidência total. Na avaliação, um limiar maior exige localização mais exata para contar um acerto."
+  },
+  "nms": {
+    "aliases": [
+      "IoU/NMS",
+      "NMS"
+    ],
+    "text": "NMS remove detecções sobrepostas do mesmo objeto. Este IoU é o limiar de sobreposição usado nessa remoção: menor costuma remover mais caixas. Modelos sem NMS podem não usar esse ajuste."
+  },
+  "precision": {
+    "aliases": [
+      "Precision",
+      "precisão"
+    ],
+    "text": "Entre as detecções aceitas, a fração que está correta. Perto de 1 é melhor e indica menos falsos positivos; 0,90 corresponde a 90% nesse conjunto avaliado."
+  },
+  "recall": {
+    "aliases": [
+      "Recall",
+      "sensibilidade"
+    ],
+    "text": "Entre os objetos reais anotados, a fração encontrada pelo modelo. Perto de 1 é melhor; 0,80 indica que cerca de 80% foram encontrados no critério avaliado."
+  },
+  "map": {
+    "aliases": [
+      "mAP"
+    ],
+    "text": "Média da precisão média entre classes, considerando diferentes limiares de confiança. Quanto maior, melhor; compare modelos no mesmo dataset e critério de IoU."
+  },
+  "map50": {
+    "aliases": [
+      "mAP50",
+      "map50",
+      "score_map50"
+    ],
+    "text": "mAP com IoU mínimo de 0,50 para considerar a localização correta. Varia de 0 a 1; maior é melhor. score_map50 usa máscaras quando disponíveis, senão caixas."
+  },
+  "map50_95": {
+    "aliases": [
+      "mAP50-95",
+      "map50_95"
+    ],
+    "text": "mAP média nos limiares de IoU de 0,50 a 0,95. É mais exigente com a localização que mAP50; varia de 0 a 1 e maior é melhor."
+  },
+  "score_primary": {
+    "aliases": [
+      "score_primary"
+    ],
+    "text": "Pontuação usada para ordenar os modelos: mAP50-95 de máscaras quando disponível, senão de caixas. Maior é melhor; compare tarefas e datasets equivalentes."
+  },
+  "loss": {
+    "aliases": [
+      "Loss",
+      "box_loss",
+      "cls_loss",
+      "dfl_loss",
+      "seg_loss"
+    ],
+    "text": "Erro que o treino tenta reduzir. box mede localização, cls mede classe, dfl auxilia a localização e seg mede segmentação. Menor tende a ser melhor, mas confirme também as métricas de validação."
+  },
+  "checkpoint": {
+    "aliases": [
+      "Checkpoint",
+      "checkpoints",
+      "pesos",
+      "best.pt",
+      "last.pt"
+    ],
+    "text": "Arquivo com os pesos salvos do modelo. best.pt guarda o melhor modelo segundo a validação; last.pt guarda o estado mais recente para retomar o treino."
+  },
+  "model": {
+    "aliases": [
+      "Modelo",
+      "modelos"
+    ],
+    "text": "Rede que aprendeu padrões visuais. A escolha determina quais pesos e classes serão usados; um modelo maior não garante melhor resultado no seu dataset."
+  },
+  "yolo": {
+    "aliases": [
+      "YOLO",
+      "YOLO26",
+      "YOLO26n"
+    ],
+    "text": "Família de modelos que localiza objetos e, em versões de segmentação, seus contornos. A variante n é compacta; confira se o checkpoint é de detecção ou segmentação."
+  },
+  "detection": {
+    "aliases": [
+      "detecção",
+      "detecções",
+      "detect"
+    ],
+    "text": "Localiza e classifica objetos em caixas. O contador representa objetos detectados, que podem incluir erros e ainda precisam de avaliação."
+  },
+  "segmentation": {
+    "aliases": [
+      "segmentação",
+      "segmentações",
+      "segment"
+    ],
+    "text": "Identifica os pixels de cada objeto, formando uma máscara. É mais detalhada que uma caixa e requer anotações de segmentação."
+  },
+  "box": {
+    "aliases": [
+      "bounding boxes",
+      "bounding box",
+      "boxes",
+      "box",
+      "bbox",
+      "caixas"
+    ],
+    "text": "Retângulo que delimita um objeto. Os contadores indicam anotações lidas, corrigidas ou ignoradas; uma caixa corrigida não significa que sua classe foi revisada."
+  },
+  "mask": {
+    "aliases": [
+      "máscara",
+      "máscaras",
+      "mask"
+    ],
+    "text": "Região de pixels atribuída a um objeto. Métricas mask ou (M) avaliam essa região; box ou (B) avaliam o retângulo que a envolve."
+  },
+  "cluster": {
+    "aliases": [
+      "cluster",
+      "clusters",
+      "clustering",
+      "clusterização",
+      "clusterizar"
+    ],
+    "text": "Agrupamento de objetos visualmente semelhantes. O número indica grupos encontrados, não classes confirmadas; a revisão humana dá significado aos grupos."
+  },
+  "min_cluster": {
+    "aliases": [
+      "Mínimo por cluster"
+    ],
+    "text": "Número mínimo de objetos para formar um grupo no HDBSCAN. Com 6, grupos menores tendem a ficar sem agrupamento; aumentar pode reduzir grupos pequenos."
+  },
+  "hdbscan": {
+    "aliases": [
+      "HDBSCAN"
+    ],
+    "text": "Algoritmo que agrupa exemplos semelhantes sem fixar o número de grupos. Exemplos sem grupo podem aparecer como ruído ou cluster -1, sem serem necessariamente inválidos."
+  },
+  "sam": {
+    "aliases": [
+      "SAM"
+    ],
+    "text": "Modelo que propõe máscaras de objetos nas imagens. As propostas são candidatos para revisão; o SAM não confirma sozinho a classe de cada objeto."
+  },
+  "dinov2": {
+    "aliases": [
+      "DINOv2"
+    ],
+    "text": "Modelo que transforma recortes em descrições numéricas da aparência. Essas descrições ajudam a agrupar objetos semelhantes, sem definir suas classes automaticamente."
+  },
+  "embedding": {
+    "aliases": [
+      "embedding",
+      "embeddings"
+    ],
+    "text": "Lista de números que representa características visuais de uma imagem ou objeto. É usada para comparar semelhança e formar clusters."
+  },
+  "dino_batch": {
+    "aliases": [
+      "Batch DINOv2"
+    ],
+    "text": "Quantidade de recortes enviada ao DINOv2 por vez para extrair características. Com 8, processa até 8 juntos; reduza se faltar memória."
+  },
+  "points_side": {
+    "aliases": [
+      "SAM points_per_side"
+    ],
+    "text": "Quantidade de pontos de amostragem em cada lado da grade do SAM. Com 16, a grade tem 16 × 16 pontos; mais pontos aumentam o trabalho e podem revelar objetos menores."
+  },
+  "points_batch": {
+    "aliases": [
+      "SAM points_per_batch"
+    ],
+    "text": "Quantidade de pontos de amostragem processados juntos pelo SAM. Reduzir economiza memória, mas pode deixar a geração de máscaras mais lenta."
+  },
+  "crop_layers": {
+    "aliases": [
+      "SAM crop_n_layers"
+    ],
+    "text": "Número de camadas extras de recortes analisadas pelo SAM. Zero desativa essas camadas; valores maiores aumentam o detalhamento e o custo."
+  },
+  "crop": {
+    "aliases": [
+      "crop",
+      "crops",
+      "recorte",
+      "recortes"
+    ],
+    "text": "Parte da imagem extraída para analisar um objeto. O tamanho mínimo em pixels evita recortes muito pequenos para extrair características visuais."
+  },
+  "context_scale": {
+    "aliases": [
+      "Contexto ao redor da box"
+    ],
+    "text": "Fator que amplia o recorte ao redor da caixa. 1,0 usa a própria caixa; 1,8 inclui mais entorno, o que pode ajudar ou distrair a comparação visual."
+  },
+  "min_area": {
+    "aliases": [
+      "Área mínima da máscara (px)"
+    ],
+    "text": "Área mínima aceita para uma máscara, em pixels de área. Com 120, regiões menores que 120 pixels são descartadas; aumentar pode remover objetos pequenos reais."
+  },
+  "tile": {
+    "aliases": [
+      "Auto-tile",
+      "tile",
+      "tiles",
+      "Auto-tile para imagens grandes",
+      "Tile manual (0 = automático)"
+    ],
+    "text": "Divide imagens grandes em blocos para reduzir o uso de memória. O tamanho é o lado do bloco em pixels; blocos menores podem cortar objetos entre regiões. No campo manual, 0 usa o modo automático."
+  },
+  "tile_trigger": {
+    "aliases": [
+      "Ativar auto-tile acima de"
+    ],
+    "text": "Limite de tamanho da imagem, em pixels, para ativar a divisão automática em blocos. Um limite menor faz mais imagens passarem por esse processamento."
+  },
+  "frame": {
+    "aliases": [
+      "frame",
+      "frames",
+      "quadro",
+      "quadros"
+    ],
+    "text": "Uma imagem de um vídeo. Processar 1 a cada N frames pula os intermediários: N maior reduz custo, mas pode perder eventos rápidos. Contadores mostram quadros, não objetos."
+  },
+  "fps": {
+    "aliases": [
+      "FPS"
+    ],
+    "text": "Quadros por segundo. No vídeo, indica a frequência de captura; no processamento, indica velocidade. Mais FPS significa mais quadros por segundo, não maior precisão."
+  },
+  "gpu": {
+    "aliases": [
+      "GPU",
+      "GPU-Util"
+    ],
+    "text": "Processador usado para acelerar os modelos. GPU-Util é a porcentagem de atividade no momento; 100% indica uso intenso, não qualidade do modelo."
+  },
+  "vram": {
+    "aliases": [
+      "VRAM",
+      "peak_vram_allocated_gb",
+      "peak_vram_reserved_gb"
+    ],
+    "text": "Memória da placa de vídeo. Usada/total mostra a ocupação atual; peak indica o pico da execução. Valores em GB ou MiB medem memória, não precisão."
+  },
+  "cpu": {
+    "aliases": [
+      "CPU"
+    ],
+    "text": "Processador principal do computador. Pode executar os modelos sem GPU, geralmente com menor velocidade."
+  },
+  "fallback": {
+    "aliases": [
+      "Fallback",
+      "Modo seguro para GPU de 6 GB"
+    ],
+    "text": "Alternativa para reduzir problemas de memória. O fallback permite usar CPU quando falta memória na GPU; o modo seguro escolhe parâmetros mais econômicos."
+  },
+  "device": {
+    "aliases": [
+      "Device"
+    ],
+    "text": "Dispositivo de execução: 0 é a primeira GPU visível; cpu usa o processador. A escolha afeta velocidade e memória disponível."
+  },
+  "imgsz": {
+    "aliases": [
+      "imgsz",
+      "Smoke imgsz",
+      "Tamanho final",
+      "Tamanho"
+    ],
+    "text": "Tamanho de referência da imagem em pixels no processamento. 640 usa resolução de referência de 640 pixels; aumentar pode ajudar objetos pequenos, mas exige mais memória."
+  },
+  "workers": {
+    "aliases": [
+      "Workers"
+    ],
+    "text": "Processos auxiliares para carregar os dados. Mais workers podem acelerar a leitura; 0 carrega no processo principal e pode facilitar diagnóstico de falhas."
+  },
+  "cache": {
+    "aliases": [
+      "Cache"
+    ],
+    "text": "Guarda dados preparados para reutilização: false desativa, disk usa disco e ram usa memória RAM. Pode acelerar leituras repetidas, consumindo espaço ou memória."
+  },
+  "amp": {
+    "aliases": [
+      "AMP"
+    ],
+    "text": "Precisão numérica mista automática. Combina formatos numéricos para reduzir memória e acelerar o treino quando o hardware e o modelo permitem."
+  },
+  "deterministic": {
+    "aliases": [
+      "Determinístico"
+    ],
+    "text": "Solicita operações reproduzíveis para facilitar comparações. Mesmo ativado, diferenças de hardware ou versões podem mudar os resultados."
+  },
+  "seed": {
+    "aliases": [
+      "Seed"
+    ],
+    "text": "Semente dos sorteios usados no processamento. Repetir 42, com o mesmo ambiente e dados, ajuda a reproduzir escolhas aleatórias; 42 não é melhor que outra semente."
+  },
+  "patience": {
+    "aliases": [
+      "Patience"
+    ],
+    "text": "Número de épocas sem melhora no critério de validação antes da parada antecipada. 30 permite esperar até 30 épocas; no YOLO, 0 desativa essa parada."
+  },
+  "save_period": {
+    "aliases": [
+      "Salvar a cada N épocas",
+      "save_period"
+    ],
+    "text": "Intervalo para salvar checkpoints extras. 10 salva a cada 10 épocas; -1 desativa esses extras, sem desativar best.pt e last.pt."
+  },
+  "close_mosaic": {
+    "aliases": [
+      "Close mosaic"
+    ],
+    "text": "Desativa mosaic nas últimas N épocas para finalizar com imagens menos alteradas. 10 reserva as últimas 10 épocas; 0 não programa esse fechamento."
+  },
+  "smoke": {
+    "aliases": [
+      "Smoke",
+      "Smoke test"
+    ],
+    "text": "Execução curta para verificar se dados, modelo e ambiente funcionam juntos. Poucas épocas servem para diagnóstico, não para concluir a qualidade final."
+  },
+  "lora": {
+    "aliases": [
+      "LoRA",
+      "Adapter",
+      "adaptador"
+    ],
+    "text": "Ajusta um conjunto pequeno de pesos adicionais sobre um modelo base. O adapter depende de uma base compatível e permite especializar o modelo com menos parâmetros treináveis."
+  },
+  "rank": {
+    "aliases": [
+      "Rank (r)",
+      "lora_r"
+    ],
+    "text": "Tamanho interno da adaptação LoRA. Um rank maior aumenta a capacidade de ajuste e o número de parâmetros; também pode exigir mais memória."
+  },
+  "alpha": {
+    "aliases": [
+      "Alpha",
+      "lora_alpha"
+    ],
+    "text": "Escala da contribuição LoRA em relação ao modelo base. Seu efeito depende também do rank e da variante usada; maior não significa melhor qualidade."
+  },
+  "dropout": {
+    "aliases": [
+      "Dropout",
+      "lora_dropout"
+    ],
+    "text": "Desativa aleatoriamente parte das ativações durante o treino para reduzir dependência excessiva. 0,10 representa 10%; 0 desativa essa regularização."
+  },
+  "head": {
+    "aliases": [
+      "head",
+      "Incluir head"
+    ],
+    "text": "Parte final da rede que produz as predições. Incluir head permite aplicar a adaptação também nessa parte; isso altera quais componentes serão ajustados."
+  },
+  "gradient_checkpointing": {
+    "aliases": [
+      "Gradient checkpointing"
+    ],
+    "text": "Economiza memória recalculando resultados intermediários durante o treino. Pode deixar o treino mais lento; não é o salvamento de arquivos de checkpoint."
+  },
+  "finetune": {
+    "aliases": [
+      "Full Fine-Tune",
+      "full_finetune",
+      "fine-tune"
+    ],
+    "text": "Ajusta os pesos liberados do modelo pré-treinado ao novo dataset. Diferentemente da LoRA, pode atualizar diretamente uma parte grande da rede."
+  },
+  "freeze": {
+    "aliases": [
+      "freeze"
+    ],
+    "text": "Congela camadas para que seus pesos não sejam ajustados. Zero deixa de solicitar congelamento; valores maiores preservam mais camadas iniciais."
+  },
+  "class": {
+    "aliases": [
+      "classe",
+      "classes",
+      "class_name",
+      "class_id"
+    ],
+    "text": "Categoria de um objeto, como ave ou barco. class_name é o nome; class_id é o índice no dataset. Revisar a classe confirma o significado atribuído ao objeto."
+  },
+  "workspace": {
+    "aliases": [
+      "Workspace",
+      "Projeto local"
+    ],
+    "text": "Pasta que reúne os dados e resultados de uma etapa. Selecionar outro workspace muda o projeto que será aberto ou salvo."
+  },
+  "json": {
+    "aliases": [
+      "JSON",
+      "Manifesto JSON"
+    ],
+    "text": "Arquivo estruturado para guardar ou transferir resultados. Na exportação, contém registros e metadados para outras ferramentas; não é um checkpoint do modelo."
+  },
+  "mosaic": {
+    "aliases": [
+      "Mosaicos",
+      "mosaic",
+      "mosaicos 2x2"
+    ],
+    "text": "Combina quatro imagens em uma composição 2 × 2, ajustando as anotações. O contador mostra composições criadas, que aumentam a variedade visual do treino."
+  },
+  "copies": {
+    "aliases": [
+      "Cópias por imagem",
+      "Cópias aumentadas por imagem de treino"
+    ],
+    "text": "Número de variações geradas para cada imagem original. Com 3, são criadas três versões adicionais por imagem, além de originais e mosaicos quando habilitados."
+  },
+  "flip": {
+    "aliases": [
+      "Flip",
+      "Flip horizontal",
+      "Flip vertical"
+    ],
+    "text": "Espelha a imagem e suas anotações. Horizontal troca esquerda e direita; vertical troca cima e baixo. Ative apenas quando fizer sentido para as cenas reais."
+  },
+  "rotate": {
+    "aliases": [
+      "rotação",
+      "Rotação 90°",
+      "Rotação livre"
+    ],
+    "text": "Gira a imagem e ajusta as anotações. A opção de 90° usa giros em ângulo reto; a livre permite outros ângulos."
+  },
+  "affine": {
+    "aliases": [
+      "Affine",
+      "shear",
+      "escala"
+    ],
+    "text": "Transformação geométrica que pode deslocar, redimensionar ou inclinar a imagem. Ajuda a variar posição e aparência dos objetos, ajustando também as caixas."
+  },
+  "brightness": {
+    "aliases": [
+      "Brilho e contraste"
+    ],
+    "text": "Varia a luminosidade e a diferença entre regiões claras e escuras. Simula condições de iluminação diferentes."
+  },
+  "gamma": {
+    "aliases": [
+      "Gamma",
+      "exposição"
+    ],
+    "text": "Altera a distribuição de luminosidade da imagem. Serve para simular diferenças de exposição sem mudar a classe anotada."
+  },
+  "hsv": {
+    "aliases": [
+      "Hue",
+      "saturação",
+      "HSV",
+      "Hue / saturação / valor"
+    ],
+    "text": "Hue é a tonalidade, saturação é a intensidade da cor e valor é o brilho no espaço HSV. A operação varia essas propriedades para diversificar as cores do treino."
+  },
+  "blur": {
+    "aliases": [
+      "Gaussian blur",
+      "blur"
+    ],
+    "text": "Desfoque que suaviza detalhes. Simula imagens menos nítidas; desfoque forte pode esconder objetos pequenos."
+  },
+  "motion_blur": {
+    "aliases": [
+      "Motion blur"
+    ],
+    "text": "Desfoque direcional que simula movimento da câmera ou do objeto. Ativado, acrescenta esse tipo de variação ao treino."
+  },
+  "noise": {
+    "aliases": [
+      "Ruído gaussiano",
+      "ruído"
+    ],
+    "text": "Adiciona pequenas variações aleatórias aos pixels. Simula imperfeições de captura, aumentando a diversidade das imagens."
+  },
+  "grayscale": {
+    "aliases": [
+      "Grayscale"
+    ],
+    "text": "Converte a imagem para tons de cinza. Ajuda a reduzir a dependência da cor, mas pode retirar uma pista importante para algumas classes."
+  },
+  "cutout": {
+    "aliases": [
+      "Cutout",
+      "coarse dropout"
+    ],
+    "text": "Oculta pequenas regiões da imagem para simular obstruções. Não é o dropout da rede; aqui a alteração ocorre nos pixels de entrada."
+  },
+  "eta": {
+    "aliases": [
+      "ETA"
+    ],
+    "text": "Estimativa do tempo restante com base no ritmo atual. Pode subir ou cair conforme a dificuldade das próximas operações."
+  },
+  "inference": {
+    "aliases": [
+      "Inferência",
+      "inference",
+      "inferir"
+    ],
+    "text": "Execução de um modelo já treinado para produzir detecções em novas imagens. Essa etapa não atualiza seus pesos."
+  },
+  "fp": {
+    "aliases": [
+      "Falsos positivos",
+      "falso positivo",
+      "false_positive",
+      "false_positives"
+    ],
+    "text": "Detecções marcadas como incorretas na revisão. O contador considera as revisadas e marcadas; detectar algo não significa que seja um acerto confirmado."
+  },
+  "tp": {
+    "aliases": [
+      "Verdadeiros positivos",
+      "verdadeiro positivo",
+      "true_positives_after_review"
+    ],
+    "text": "Nesta revisão, são detecções salvas como revisadas e não marcadas como falso positivo. O contador depende da decisão humana registrada."
+  },
+  "fp_rate": {
+    "aliases": [
+      "false_positive_rate_over_reviewed"
+    ],
+    "text": "Fração de detecções revisadas marcadas como falso positivo. 0,20 significa 20%; não é a taxa clássica FP/(FP+TN), pois aqui o denominador contém apenas detecções revisadas."
+  },
+  "reviewed": {
+    "aliases": [
+      "Revisadas",
+      "reviewed",
+      "reviewed_detections",
+      "pending_review"
+    ],
+    "text": "Indica se a revisão humana foi salva. Não marcar falso positivo só confirma um acerto depois de salvar; pending_review conta detecções ainda sem revisão salva."
+  },
+  "coordinates": {
+    "aliases": [
+      "x1",
+      "y1",
+      "x2",
+      "y2"
+    ],
+    "text": "Coordenadas da caixa em pixels na imagem: (x1, y1) é o canto superior esquerdo e (x2, y2) o inferior direito. Não representam confiança nem tamanho normalizado."
+  },
+  "frame_index": {
+    "aliases": [
+      "frame_index"
+    ],
+    "text": "Índice do quadro no vídeo, começando em zero. Pode haver saltos quando a inferência processa apenas um a cada N frames."
+  },
+  "detection_uid": {
+    "aliases": [
+      "detection_uid"
+    ],
+    "text": "Identificador único da detecção. Liga a linha da tabela ao objeto salvo para revisão; não é uma classe ou pontuação."
+  },
+  "latency": {
+    "aliases": [
+      "speed_ms",
+      "latência"
+    ],
+    "text": "Tempo de processamento em milissegundos por imagem informado pelo avaliador. Menor é mais rápido; compare com o mesmo hardware, resolução e batch."
+  },
+  "parameters": {
+    "aliases": [
+      "parameters",
+      "total_parameters",
+      "trainable_parameters",
+      "trainable_percent",
+      "gflops"
+    ],
+    "text": "Parâmetros são os valores internos da rede; trainable conta os ajustáveis e trainable_percent sua porcentagem. GFLOPs estima operações: mais capacidade ou custo não garante mais precisão."
+  },
+  "hardware": {
+    "aliases": [
+      "Perfil de hardware"
+    ],
+    "text": "Conjunto de parâmetros adequado ao computador ou ao Colab. A seleção define limites como batch, workers e cache; confira e salve os valores antes de iniciar."
+  },
+  "stage": {
+    "aliases": [
+      "Etapa"
+    ],
+    "text": "Operação ou experimento selecionado. Modelo geral aprende no dataset amplo; especialista adapta a uma parte específica; controle compara o ajuste completo com LoRA; smoke é uma verificação curta."
+  },
+  "objects": {
+    "aliases": [
+      "Objeto",
+      "Objeto classificado",
+      "Objeto ignorado",
+      "Objetos propostos",
+      "Objetos classificados e ativos",
+      "Máx. objetos/imagem"
+    ],
+    "text": "Objeto é uma região candidata da imagem. O limite controla quantos candidatos são mantidos por imagem; os contadores de classificados e ativos mostram apenas os que receberam classe e não foram ignorados."
+  },
+  "review_status": {
+    "aliases": [
+      "Pendentes",
+      "Classificados",
+      "Ignorados"
+    ],
+    "text": "Pendentes aguardam decisão humana; classificados receberam uma classe; ignorados foram retirados da seleção ativa. Esses contadores descrevem a revisão, não a precisão do modelo."
+  },
+  "run": {
+    "aliases": [
+      "Execução",
+      "run_id",
+      "model_id"
+    ],
+    "text": "Identifica o processamento ou o modelo que originou o registro. Selecionar uma execução filtra os resultados desse processamento, sem executar inferência novamente."
+  },
+  "images_count": {
+    "aliases": [
+      "Imagens processadas",
+      "total_images_processed",
+      "images_with_positive_detections",
+      "images_without_detections"
+    ],
+    "text": "Contagem de imagens ou quadros processados. Uma imagem pode ter várias detecções ou nenhuma; esse número não corresponde à quantidade de objetos."
+  },
+  "positive_count": {
+    "aliases": [
+      "positive_detections_before_review",
+      "Detecções positivas"
+    ],
+    "text": "Quantidade de detecções geradas antes da revisão. Positiva significa que o modelo apontou um objeto; não significa um acerto validado."
+  },
+  "checkpoint_size": {
+    "aliases": [
+      "checkpoint_size_mb"
+    ],
+    "text": "Tamanho do arquivo de pesos em MiB (embora a coluna use o sufixo mb). Serve para comparar armazenamento e transferência; um arquivo maior não garante melhor precisão."
+  },
+  "checkpoint_hash": {
+    "aliases": [
+      "checkpoint_sha256"
+    ],
+    "text": "Assinatura do arquivo de pesos usada para identificar exatamente o checkpoint avaliado. Assinaturas iguais ajudam a confirmar que se trata do mesmo arquivo."
+  },
+  "duration": {
+    "aliases": [
+      "elapsed_seconds",
+      "duration_seconds"
+    ],
+    "text": "Tempo decorrido em segundos na operação registrada. Menor indica execução mais rápida, mas compare com o mesmo volume de dados e equipamento."
+  },
+  "review_note": {
+    "aliases": [
+      "review_note",
+      "reviewed_at_utc",
+      "generated_at_utc"
+    ],
+    "text": "review_note guarda a observação humana. Os campos terminados em at_utc registram data e hora em UTC, que pode diferir do horário local."
+  },
+  "source": {
+    "aliases": [
+      "source_name",
+      "frame_path",
+      "source_name"
+    ],
+    "text": "Identifica o arquivo de origem ou o caminho da imagem do quadro. Ajuda a localizar a mídia correspondente à detecção."
+  },
+  "pretrained": {
+    "aliases": [
+      "pretrained",
+      "pré-treinado"
+    ],
+    "text": "Indica uso de pesos que já aprenderam em outro conjunto de dados. É o ponto de partida para adaptar o modelo ao seu dataset."
+  },
+  "optimizer": {
+    "aliases": [
+      "optimizer",
+      "otimizador"
+    ],
+    "text": "Algoritmo que ajusta os pesos usando o erro de treino. auto permite que o YOLO escolha a configuração; o nome não é uma medida de qualidade."
+  },
+  "momentum": {
+    "aliases": [
+      "momentum"
+    ],
+    "text": "Usa parte dos ajustes anteriores para suavizar a direção do aprendizado. O efeito depende do otimizador; não é uma porcentagem de acertos."
+  },
+  "weight_decay": {
+    "aliases": [
+      "weight_decay"
+    ],
+    "text": "Regularização que desestimula pesos muito grandes. Pode reduzir excesso de adaptação ao treino; valores altos demais podem dificultar o aprendizado."
+  },
+  "review_validation": {
+    "aliases": [
+      "Validação da revisão"
+    ],
+    "text": "Registro final da revisão humana de uma execução. Reúne detecções revisadas e falsos positivos; não substitui uma avaliação com todas as anotações necessárias para calcular recall e mAP."
+  }
+}

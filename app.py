@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+from contextual_help import help_for, help_text, help_json
+
 import streamlit as st
 
 from tcc_discovery.augment import augment_project
@@ -97,9 +99,7 @@ def _progress_widgets():
 
 st.set_page_config(page_title="TCC - Object Discovery Lab", layout="wide")
 st.title("Object Discovery Lab")
-st.caption(
-    f"{APP_VERSION} · upload de imagem/vídeo, descoberta SAM, clustering pelas boxes e revisão humana."
-)
+help_text(f"{APP_VERSION} · upload de imagem/vídeo, descoberta SAM, clustering pelas boxes e revisão humana.", caption=True)
 
 page = st.sidebar.radio(
     "Etapa",
@@ -113,17 +113,16 @@ page = st.sidebar.radio(
         "6. Exportar",
         "7. Aumentar dataset",
     ],
+    help=help_for('Etapa'),
 )
 project_default = "workspace/upload_cluster" if page == "0. Upload e clusterizar" else "workspace/discovery"
-project_dir = Path(st.sidebar.text_input("Projeto local", project_default))
+project_dir = Path(st.sidebar.text_input("Projeto local", project_default, help=help_for('Projeto local')))
 
 
 if page == "0. Upload e clusterizar":
     st.subheader("Upload rápido de imagem ou vídeo")
-    st.write(
-        "Envie uma imagem ou vídeo. Para vídeo você pode processar todos os frames ou percorrer toda a duração "
-        "por amostragem. Depois o SAM gera candidatos, o DINOv2 extrai embeddings e o HDBSCAN forma os clusters."
-    )
+    help_text("Envie uma imagem ou vídeo. Para vídeo você pode processar todos os frames ou percorrer toda a duração "
+        "por amostragem. Depois o SAM gera candidatos, o DINOv2 extrai embeddings e o HDBSCAN forma os clusters.")
     uploaded = st.file_uploader(
         "Imagem ou vídeo",
         type=["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "mp4", "mov", "avi", "mkv", "m4v", "webm"],
@@ -166,6 +165,7 @@ if page == "0. Upload e clusterizar":
                         [0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
                         index=2,
                         format_func=lambda x: f"{x:g} s",
+                        help=help_for('Extrair 1 frame a cada'),
                     )
                     max_frames = st.number_input(
                         "Máximo de frames (0 = sem limite)",
@@ -174,8 +174,8 @@ if page == "0. Upload e clusterizar":
                         value=0,
                         step=10,
                         help=(
-                            "0 percorre toda a duração do vídeo sem limitar a quantidade de frames amostrados. "
-                            "Ex.: 1 frame/s em vídeo de 10 min = aproximadamente 600 frames."
+                            help_for('Máximo de frames (0 = sem limite)') + "\n\n" + ("0 percorre toda a duração do vídeo sem limitar a quantidade de frames amostrados. "
+                            "Ex.: 1 frame/s em vídeo de 10 min = aproximadamente 600 frames.")
                         ),
                     )
             else:
@@ -184,32 +184,32 @@ if page == "0. Upload e clusterizar":
                 max_frames = 1
             checkpoint = st.text_input(
                 "Checkpoint SAM", "weights/sam_vit_b_01ec64.pth", key="upload_sam_checkpoint"
-            )
+            , help=help_for('Checkpoint SAM'))
 
         with c2:
             points = st.select_slider(
                 "SAM points_per_side", [8, 12, 16, 24, 32], value=16, key="upload_points"
-            )
+            , help=help_for('SAM points_per_side'))
             points_batch = st.selectbox(
                 "SAM points_per_batch", [1, 2, 4, 8, 16], index=2, key="upload_points_batch"
-            )
+            , help=help_for('SAM points_per_batch'))
             max_objects = st.number_input(
                 "Máx. objetos por frame", 1, 300, 30, key="upload_max_objects"
-            )
+            , help=help_for('Máx. objetos por frame'))
             min_area = st.number_input(
                 "Área mínima da máscara (px)", 10, 100000, 80, key="upload_min_area"
-            )
+            , help=help_for('Área mínima da máscara (px)'))
 
         with c3:
             auto_tile_size = st.selectbox(
                 "Auto-tile", [256, 384, 512, 640, 768, 1024], index=2, key="upload_tile"
-            )
+            , help=help_for('Auto-tile'))
             min_cluster = st.number_input(
                 "Mínimo por cluster", 2, 100, 3, key="upload_min_cluster"
-            )
+            , help=help_for('Mínimo por cluster'))
             embedding_batch = st.selectbox(
                 "Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2, key="upload_dino_batch"
-            )
+            , help=help_for('Batch DINOv2'))
             overwrite = st.checkbox("Recriar projeto", value=False, key="upload_overwrite")
 
         st.info(
@@ -217,7 +217,7 @@ if page == "0. Upload e clusterizar":
             "tempo de execução e espaço em disco também crescem proporcionalmente ao número de frames."
         )
 
-        if st.button("Preparar upload e clusterizar", type="primary"):
+        if st.button("Preparar upload e clusterizar", type="primary", help=help_for('Preparar upload e clusterizar')):
             try:
                 prep_bar, prep_status, prep_progress = _progress_widgets()
                 prep_status.write("Preparando mídia...")
@@ -265,13 +265,13 @@ if page == "0. Upload e clusterizar":
                 counts = Counter(int(o.get("cluster", -1)) for o in catalog.get("objects", []))
                 regular_clusters = [c for c in counts if c != -1]
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Frames processados", len(catalog.get("images", [])))
-                m2.metric("Objetos propostos", len(catalog.get("objects", [])))
-                m3.metric("Clusters", len(regular_clusters))
+                m1.metric("Frames processados", len(catalog.get("images", [])), help=help_for('Frames processados'))
+                m2.metric("Objetos propostos", len(catalog.get("objects", [])), help=help_for('Objetos propostos'))
+                m3.metric("Clusters", len(regular_clusters), help=help_for('Clusters'))
                 st.success("Upload processado e clusterizado. Use '3. Classificar pendentes' para revisar os grupos.")
                 if counts:
-                    st.write("Distribuição dos maiores clusters:")
-                    st.json({str(k): int(v) for k, v in counts.most_common(12)})
+                    help_text("Distribuição dos maiores clusters:")
+                    help_json({str(k): int(v) for k, v in counts.most_common(12)})
             except Exception as exc:
                 st.exception(exc)
     else:
@@ -279,43 +279,41 @@ if page == "0. Upload e clusterizar":
 
 
 elif page == "1. Descobrir com SAM":
-    st.subheader("Descoberta não supervisionada com SAM")
-    st.caption(
-        "Baseline totalmente automático. Os tiles são internos e as coordenadas voltam para a imagem original."
-    )
+    st.subheader("Descoberta não supervisionada com SAM", help=help_for('Descoberta não supervisionada com SAM'))
+    help_text("Baseline totalmente automático. Os tiles são internos e as coordenadas voltam para a imagem original.", caption=True)
     input_dir = st.text_input("Pasta de imagens", "data/roboflow/train/images")
-    checkpoint = st.text_input("Checkpoint SAM", "weights/sam_vit_b_01ec64.pth")
-    low_memory = st.checkbox("Modo seguro para GPU de 6 GB", value=True)
+    checkpoint = st.text_input("Checkpoint SAM", "weights/sam_vit_b_01ec64.pth", help=help_for('Checkpoint SAM'))
+    low_memory = st.checkbox("Modo seguro para GPU de 6 GB", value=True, help=help_for('Modo seguro para GPU de 6 GB'))
 
     c1, c2, c3 = st.columns(3)
     with c1:
         points = st.select_slider(
             "SAM points_per_side", [8, 12, 16, 24, 32, 48, 64], value=16 if low_memory else 32
-        )
+        , help=help_for('SAM points_per_side'))
         points_batch = st.selectbox(
             "SAM points_per_batch", [1, 2, 4, 8, 16, 32, 64], index=2 if low_memory else 4
-        )
-        crop_layers = st.selectbox("SAM crop_n_layers", [0, 1, 2], index=0 if low_memory else 1)
-        min_area = st.number_input("Área mínima da máscara (px)", 10, 100000, 120)
+        , help=help_for('SAM points_per_batch'))
+        crop_layers = st.selectbox("SAM crop_n_layers", [0, 1, 2], index=0 if low_memory else 1, help=help_for('SAM crop_n_layers'))
+        min_area = st.number_input("Área mínima da máscara (px)", 10, 100000, 120, help=help_for('Área mínima da máscara (px)'))
     with c2:
-        max_objects = st.number_input("Máx. objetos/imagem", 1, 300, 30 if low_memory else 50)
+        max_objects = st.number_input("Máx. objetos/imagem", 1, 300, 30 if low_memory else 50, help=help_for('Máx. objetos/imagem'))
         manual_tile = st.selectbox(
             "Tile manual (0 = automático)", [0, 256, 384, 512, 640, 768, 1024, 1280, 1536], index=0
-        )
-        auto_tile = st.checkbox("Auto-tile para imagens grandes", value=True)
+        , help=help_for('Tile manual (0 = automático)'))
+        auto_tile = st.checkbox("Auto-tile para imagens grandes", value=True, help=help_for('Auto-tile para imagens grandes'))
         auto_tile_size = st.selectbox(
             "Tamanho do tile automático", [256, 384, 512, 640, 768, 1024], index=2 if low_memory else 4
-        )
+        , help=help_for('Tamanho do tile automático'))
         auto_tile_trigger = st.selectbox(
             "Ativar auto-tile acima de", [768, 1024, 1280, 1536, 2048, 3072], index=1 if low_memory else 3
-        )
+        , help=help_for('Ativar auto-tile acima de'))
     with c3:
-        min_cluster = st.number_input("Mínimo por cluster", 2, 100, 3 if low_memory else 6)
+        min_cluster = st.number_input("Mínimo por cluster", 2, 100, 3 if low_memory else 6, help=help_for('Mínimo por cluster'))
         embedding_batch = st.selectbox(
             "Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2 if low_memory else 3
-        )
-        cpu_fallback = st.checkbox("Fallback SAM para CPU se faltar VRAM", value=True)
-        dino_cpu_fallback = st.checkbox("Fallback DINOv2 para CPU", value=True)
+        , help=help_for('Batch DINOv2'))
+        cpu_fallback = st.checkbox("Fallback SAM para CPU se faltar VRAM", value=True, help=help_for('Fallback SAM para CPU se faltar VRAM'))
+        dino_cpu_fallback = st.checkbox("Fallback DINOv2 para CPU", value=True, help=help_for('Fallback DINOv2 para CPU'))
         overwrite = st.checkbox("Recriar projeto", value=False)
 
     if st.button("Executar descoberta", type="primary"):
@@ -344,27 +342,25 @@ elif page == "1. Descobrir com SAM":
 
 
 elif page == "2. Clusterizar bounding boxes":
-    st.subheader("Clustering usando as bounding boxes já revisadas no Roboflow")
-    st.write(
-        "Cada bounding box YOLO é recortada inteira, com contexto ao redor, e o DINOv2 + HDBSCAN agrupa os objetos."
-    )
-    split_dir = st.text_input("Pasta do split YOLO", "data/roboflow/train")
+    st.subheader("Clustering usando as bounding boxes já revisadas no Roboflow", help=help_for('Clustering usando as bounding boxes já revisadas no Roboflow'))
+    help_text("Cada bounding box YOLO é recortada inteira, com contexto ao redor, e o DINOv2 + HDBSCAN agrupa os objetos.")
+    split_dir = st.text_input("Pasta do split YOLO", "data/roboflow/train", help=help_for('Pasta do split YOLO'))
     c1, c2, c3 = st.columns(3)
     with c1:
-        context_scale = st.selectbox("Contexto ao redor da box", [1.0, 1.4, 1.8, 2.5, 3.0], index=2)
-        min_crop = st.selectbox("Crop mínimo para objetos minúsculos (px)", [32, 48, 64, 96, 128, 192], index=2)
+        context_scale = st.selectbox("Contexto ao redor da box", [1.0, 1.4, 1.8, 2.5, 3.0], index=2, help=help_for('Contexto ao redor da box'))
+        min_crop = st.selectbox("Crop mínimo para objetos minúsculos (px)", [32, 48, 64, 96, 128, 192], index=2, help=help_for('Crop mínimo para objetos minúsculos (px)'))
     with c2:
-        min_cluster = st.number_input("Mínimo por cluster", 2, 100, 6)
+        min_cluster = st.number_input("Mínimo por cluster", 2, 100, 6, help=help_for('Mínimo por cluster'))
         embedding_batch = st.selectbox(
             "Batch DINOv2", [1, 2, 4, 8, 16, 32], index=2, key="bbox_dino_batch"
-        )
+        , help=help_for('Batch DINOv2'))
     with c3:
-        dino_cpu_fallback = st.checkbox("Fallback DINOv2 para CPU", value=True, key="bbox_cpu_fallback")
+        dino_cpu_fallback = st.checkbox("Fallback DINOv2 para CPU", value=True, key="bbox_cpu_fallback", help=help_for('Fallback DINOv2 para CPU'))
         overwrite = st.checkbox("Recriar projeto", value=False, key="bbox_overwrite")
 
     st.info("Use outro Projeto local, por exemplo workspace/bbox_clusters_v1, para preservar o baseline do SAM.")
 
-    if st.button("Clusterizar boxes anotadas", type="primary"):
+    if st.button("Clusterizar boxes anotadas", type="primary", help=help_for('Clusterizar boxes anotadas')):
         cfg = BoxClusteringConfig(
             context_scale=float(context_scale),
             min_crop_size_px=int(min_crop),
@@ -383,7 +379,7 @@ elif page == "2. Clusterizar bounding boxes":
 
 
 elif page == "3. Classificar pendentes":
-    st.subheader("Fila de clusters pendentes")
+    st.subheader("Fila de clusters pendentes", help=help_for('Fila de clusters pendentes'))
     catalog = _project_or_stop(project_dir)
     objects = catalog["objects"]
     pending = [o for o in objects if not o.get("ignored") and not o.get("label")]
@@ -391,9 +387,9 @@ elif page == "3. Classificar pendentes":
     ignored = [o for o in objects if o.get("ignored")]
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Pendentes", len(pending))
-    m2.metric("Classificados", len(classified))
-    m3.metric("Ignorados", len(ignored))
+    m1.metric("Pendentes", len(pending), help=help_for('Pendentes'))
+    m2.metric("Classificados", len(classified), help=help_for('Classificados'))
+    m3.metric("Ignorados", len(ignored), help=help_for('Ignorados'))
 
     if not pending:
         st.success("Não há objetos pendentes. Use 'Revisar classificados' para conferir o que já foi rotulado.")
@@ -405,15 +401,16 @@ elif page == "3. Classificar pendentes":
         "Cluster pendente",
         clusters,
         format_func=lambda x: f"Cluster {x} — {counts[x]} pendentes" + (" (outliers)" if x == -1 else ""),
+        help=help_for('Cluster pendente'),
     )
     group = [o for o in pending if int(o.get("cluster", -1)) == int(cluster)]
 
     if cluster == -1:
         st.warning("Cluster -1 contém outliers do HDBSCAN. Evite aplicar uma classe em massa sem conferir as miniaturas.")
 
-    label = st.text_input("Nome da classe")
+    label = st.text_input("Nome da classe", help=help_for('Nome da classe'))
     b1, b2 = st.columns(2)
-    if b1.button("Aplicar classe e retirar da fila", type="primary"):
+    if b1.button("Aplicar classe e retirar da fila", type="primary", help=help_for('Aplicar classe e retirar da fila')):
         if not label.strip():
             st.warning("Informe um nome de classe.")
         else:
@@ -429,24 +426,24 @@ elif page == "3. Classificar pendentes":
     _show_thumbnails(project_dir, group, f"pending_{cluster}")
 
     st.markdown("#### Exceção individual")
-    obj_id = st.selectbox("Objeto", [o["id"] for o in group], key="pending_obj")
+    obj_id = st.selectbox("Objeto", [o["id"] for o in group], key="pending_obj", help=help_for('Objeto'))
     obj = next(o for o in group if o["id"] == obj_id)
     st.image(_render_overlay(project_dir, obj), caption=obj_id, use_container_width=True)
-    individual_label = st.text_input("Classe individual", key=f"pending_label_{obj_id}")
+    individual_label = st.text_input("Classe individual", key=f"pending_label_{obj_id}", help=help_for('Classe individual'))
     c1, c2 = st.columns(2)
-    if c1.button("Classificar apenas este objeto"):
+    if c1.button("Classificar apenas este objeto", help=help_for('Classificar apenas este objeto')):
         if not individual_label.strip():
             st.warning("Informe uma classe individual.")
         else:
             _update_objects(project_dir, [obj_id], label=individual_label, ignored=False)
             st.rerun()
-    if c2.button("Ignorar apenas este objeto"):
+    if c2.button("Ignorar apenas este objeto", help=help_for('Ignorar apenas este objeto')):
         _update_objects(project_dir, [obj_id], ignored=True)
         st.rerun()
 
 
 elif page == "4. Revisar classificados":
-    st.subheader("Revisão dos clusters já classificados")
+    st.subheader("Revisão dos clusters já classificados", help=help_for('Revisão dos clusters já classificados'))
     catalog = _project_or_stop(project_dir)
     classified = [o for o in catalog["objects"] if not o.get("ignored") and o.get("label")]
     if not classified:
@@ -454,22 +451,23 @@ elif page == "4. Revisar classificados":
         st.stop()
 
     labels = sorted({str(o["label"]) for o in classified})
-    selected_label = st.selectbox("Filtrar por classe", ["Todas"] + labels)
+    selected_label = st.selectbox("Filtrar por classe", ["Todas"] + labels, help=help_for('Filtrar por classe'))
     visible = classified if selected_label == "Todas" else [o for o in classified if o.get("label") == selected_label]
     counts = Counter(int(o.get("cluster", -1)) for o in visible)
     cluster = st.selectbox(
         "Cluster classificado",
         sorted(counts, key=lambda x: (x == -1, x)),
         format_func=lambda x: f"Cluster {x} — {counts[x]} objetos",
+        help=help_for('Cluster classificado'),
     )
     group = [o for o in visible if int(o.get("cluster", -1)) == int(cluster)]
     current = Counter(o.get("label") for o in group)
     st.write("Classes atuais no grupo:", dict(current))
     _show_thumbnails(project_dir, group, f"review_{selected_label}_{cluster}")
 
-    new_label = st.text_input("Alterar classe do grupo visível", value=next(iter(current), ""))
+    new_label = st.text_input("Alterar classe do grupo visível", value=next(iter(current), ""), help=help_for('Alterar classe do grupo visível'))
     c1, c2, c3 = st.columns(3)
-    if c1.button("Salvar nova classe do grupo", type="primary"):
+    if c1.button("Salvar nova classe do grupo", type="primary", help=help_for('Salvar nova classe do grupo')):
         if new_label.strip():
             _update_objects(project_dir, [o["id"] for o in group], label=new_label, ignored=False)
             st.rerun()
@@ -481,21 +479,21 @@ elif page == "4. Revisar classificados":
         st.rerun()
 
     st.markdown("#### Revisar/remover falso individual")
-    obj_id = st.selectbox("Objeto classificado", [o["id"] for o in group], key="review_obj")
+    obj_id = st.selectbox("Objeto classificado", [o["id"] for o in group], key="review_obj", help=help_for('Objeto classificado'))
     obj = next(o for o in group if o["id"] == obj_id)
     st.image(_render_overlay(project_dir, obj), caption=obj_id, use_container_width=True)
     individual_label = st.text_input(
         "Classe deste objeto", value=obj.get("label") or "", key=f"review_label_{obj_id}"
-    )
+    , help=help_for('Classe deste objeto'))
     b1, b2, b3 = st.columns(3)
-    if b1.button("Salvar classe individual"):
+    if b1.button("Salvar classe individual", help=help_for('Salvar classe individual')):
         if individual_label.strip():
             _update_objects(project_dir, [obj_id], label=individual_label, ignored=False)
             st.rerun()
-    if b2.button("Voltar objeto para pendentes"):
+    if b2.button("Voltar objeto para pendentes", help=help_for('Voltar objeto para pendentes')):
         _update_objects(project_dir, [obj_id], label=None, ignored=False)
         st.rerun()
-    if b3.button("Marcar objeto como falso/ignorar"):
+    if b3.button("Marcar objeto como falso/ignorar", help=help_for('Marcar objeto como falso/ignorar')):
         _update_objects(project_dir, [obj_id], ignored=True)
         st.rerun()
 
@@ -513,6 +511,7 @@ elif page == "5. Revisar ignorados":
         "Cluster com itens ignorados",
         sorted(counts, key=lambda x: (x == -1, x)),
         format_func=lambda x: f"Cluster {x} — {counts[x]} ignorados",
+        help=help_for('Cluster com itens ignorados'),
     )
     group = [o for o in ignored if int(o.get("cluster", -1)) == int(cluster)]
     _show_thumbnails(project_dir, group, f"ignored_{cluster}")
@@ -521,10 +520,10 @@ elif page == "5. Revisar ignorados":
         _update_objects(project_dir, [o["id"] for o in group], ignored=False)
         st.rerun()
 
-    obj_id = st.selectbox("Objeto ignorado", [o["id"] for o in group], key="ignored_obj")
+    obj_id = st.selectbox("Objeto ignorado", [o["id"] for o in group], key="ignored_obj", help=help_for('Objeto ignorado'))
     obj = next(o for o in group if o["id"] == obj_id)
     st.image(_render_overlay(project_dir, obj), caption=obj_id, use_container_width=True)
-    if st.button("Restaurar apenas este objeto"):
+    if st.button("Restaurar apenas este objeto", help=help_for('Restaurar apenas este objeto')):
         _update_objects(project_dir, [obj_id], ignored=False)
         st.rerun()
 
@@ -533,32 +532,32 @@ elif page == "6. Exportar":
     st.subheader("Exportação")
     catalog = _project_or_stop(project_dir)
     labeled = [o for o in catalog["objects"] if o.get("label") and not o.get("ignored")]
-    st.metric("Objetos classificados e ativos", len(labeled))
+    st.metric("Objetos classificados e ativos", len(labeled), help=help_for('Objetos classificados e ativos'))
     st.write("Classes:", sorted({o["label"] for o in labeled}))
 
     if catalog.get("project_type") == "bbox_clustering":
         st.info(
             "Este projeto foi criado a partir das bounding boxes existentes. Ele ainda não possui máscaras de segmentação."
         )
-        output = st.text_input("Manifesto JSON", "exports/bbox_clusters_manifest.json")
+        output = st.text_input("Manifesto JSON", "exports/bbox_clusters_manifest.json", help=help_for('Manifesto JSON'))
         if st.button("Exportar manifesto", type="primary"):
             result = export_bbox_manifest(project_dir, output)
             st.success(f"Manifesto exportado com {result['rows']} objetos.")
-            st.json(result)
+            help_json(result)
     else:
         output = st.text_input("Pasta de saída", "exports/yolo")
-        if st.button("Exportar bounding boxes + segmentation", type="primary"):
+        if st.button("Exportar bounding boxes + segmentation", type="primary", help=help_for('Exportar bounding boxes + segmentation')):
             try:
                 result = export_yolo(project_dir, output)
                 st.success(f"Exportado: {result['images']} imagens / {result['objects']} objetos.")
-                st.json(result)
+                help_json(result)
             except Exception as exc:
                 st.exception(exc)
         st.code("labels_detection/*.txt\nlabels_segmentation/*.txt\nclasses.txt\ndata.yaml")
 
 
 else:
-    st.subheader("Data augmentation")
+    st.subheader("Data augmentation", help=help_for('Data augmentation'))
     catalog = _project_or_stop(project_dir)
     if catalog.get("project_type") == "bbox_clustering":
         st.warning(
@@ -568,17 +567,15 @@ else:
 
     output = st.text_input("Pasta de saída", "exports/augmented")
     c1, c2, c3 = st.columns(3)
-    copies = c1.number_input("Cópias por imagem", 1, 20, 3)
-    size = c2.selectbox("Tamanho", [512, 640, 768, 1024], index=1)
-    aggressive = c3.checkbox("Augmentation agressiva", value=False)
-    mosaic = st.checkbox("Gerar mosaicos 2x2", value=True)
-    st.write(
-        "Inclui flip, rotação, shear/affine, brilho, exposição, blur, motion blur, ruído, saturação/hue, grayscale e cutout."
-    )
-    if st.button("Gerar dataset aumentado", type="primary"):
+    copies = c1.number_input("Cópias por imagem", 1, 20, 3, help=help_for('Cópias por imagem'))
+    size = c2.selectbox("Tamanho", [512, 640, 768, 1024], index=1, help=help_for('Tamanho'))
+    aggressive = c3.checkbox("Augmentation agressiva", value=False, help=help_for('Augmentation agressiva'))
+    mosaic = st.checkbox("Gerar mosaicos 2x2", value=True, help=help_for('Gerar mosaicos 2x2'))
+    help_text("Inclui flip, rotação, shear/affine, brilho, exposição, blur, motion blur, ruído, saturação/hue, grayscale e cutout.")
+    if st.button("Gerar dataset aumentado", type="primary", help=help_for('Gerar dataset aumentado')):
         try:
             result = augment_project(project_dir, output, int(copies), int(size), aggressive, mosaic)
             st.success(f"Geradas {result['generated_images']} imagens ({result['mosaics']} mosaicos).")
-            st.json(result)
+            help_json(result)
         except Exception as exc:
             st.exception(exc)

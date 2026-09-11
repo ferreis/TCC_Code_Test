@@ -220,7 +220,8 @@ def augment_project(
             generated += 1
 
     (output_dir / "classes.txt").write_text("\n".join(classes), encoding="utf-8")
-    data_yaml = "path: .\ntrain: images\nval: images\nnames:\n" + "".join(
+    # Omit "path" so Ultralytics uses the YAML directory as the dataset root.
+    data_yaml = "train: images\nval: images\nnames:\n" + "".join(
         f"  {idx}: {json.dumps(name, ensure_ascii=False)}\n" for idx, name in enumerate(classes)
     )
     (output_dir / "data.yaml").write_text(data_yaml, encoding="utf-8")

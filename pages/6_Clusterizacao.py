@@ -9,13 +9,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from contextual_help import help_for, help_text
+
 from tcc_discovery.box_clustering import BoxClusteringConfig, run_box_clustering
 from tcc_discovery.dataset_augmentation import discover_yolo_datasets, resolve_yolo_split
 from tcc_discovery.workspace_registry import add_entry, list_entries
 
 st.set_page_config(page_title='TCC - Clusterização', layout='wide')
-st.title('Clusterização')
-st.caption('Etapa independente: dataset YOLO anotado → crops das bounding boxes → DINOv2 → HDBSCAN → revisão humana.')
+st.title('Clusterização', help=help_for('Clusterização'))
+help_text('Etapa independente: dataset YOLO anotado → crops das bounding boxes → DINOv2 → HDBSCAN → revisão humana.', caption=True)
 
 st.info(
     'Clusterização não executa augmentation nem treinamento. Depois de revisar/classificar os clusters, '
@@ -24,9 +26,9 @@ st.info(
 
 datasets = discover_yolo_datasets(REPO_ROOT / 'data', REPO_ROOT / 'exports')
 options = [str(p) for p in datasets]
-selected = st.selectbox('Dataset YOLO', options + ['Digitar caminho...'], index=0 if options else len(options))
+selected = st.selectbox('Dataset YOLO', options + ['Digitar caminho...'], index=0 if options else len(options), help=help_for('Dataset YOLO'))
 if selected == 'Digitar caminho...':
-    data_yaml = Path(st.text_input('Caminho do data.yaml', 'data/roboflow/data.yaml'))
+    data_yaml = Path(st.text_input('Caminho do data.yaml', 'data/roboflow/data.yaml', help=help_for('Caminho do data.yaml')))
 else:
     data_yaml = Path(selected)
 if not data_yaml.is_absolute():
@@ -40,13 +42,13 @@ try:
 except Exception as exc:
     st.warning(f'Não foi possível resolver automaticamente o split train: {exc}')
 
-st.text_input('Split usado para clusterização', value=str(split_dir), disabled=True)
+st.text_input('Split usado para clusterização', value=str(split_dir), disabled=True, help=help_for('Split usado para clusterização'))
 
 entries = list_entries('cluster_projects')
 workspace_labels = [f"{e['name']} — {e['value']}" for e in entries]
-choice = st.selectbox('Workspace de clusterização', workspace_labels + ['➕ Criar novo workspace'])
+choice = st.selectbox('Workspace de clusterização', workspace_labels + ['➕ Criar novo workspace'], help=help_for('Workspace de clusterização'))
 if choice == '➕ Criar novo workspace':
-    workspace_name = st.text_input('Nome do novo workspace', 'bbox_clusters_v1')
+    workspace_name = st.text_input('Nome do novo workspace', 'bbox_clusters_v1', help=help_for('Nome do novo workspace'))
     workspace_path = st.text_input('Pasta', f'workspace/{workspace_name}')
 else:
     entry = entries[workspace_labels.index(choice)]
@@ -54,16 +56,16 @@ else:
     workspace_path = str(entry['value'])
 
 c1, c2, c3, c4 = st.columns(4)
-context_scale = c1.selectbox('Contexto ao redor da box', [1.0, 1.4, 1.8, 2.5, 3.0], index=2)
-min_crop = c2.selectbox('Crop mínimo (px)', [32, 48, 64, 96, 128, 192], index=2)
-min_cluster = c3.number_input('Mínimo por cluster', 2, 100, 6)
-embedding_batch = c4.selectbox('Batch DINOv2', [1, 2, 4, 8, 16, 32], index=2)
+context_scale = c1.selectbox('Contexto ao redor da box', [1.0, 1.4, 1.8, 2.5, 3.0], index=2, help=help_for('Contexto ao redor da box'))
+min_crop = c2.selectbox('Crop mínimo (px)', [32, 48, 64, 96, 128, 192], index=2, help=help_for('Crop mínimo (px)'))
+min_cluster = c3.number_input('Mínimo por cluster', 2, 100, 6, help=help_for('Mínimo por cluster'))
+embedding_batch = c4.selectbox('Batch DINOv2', [1, 2, 4, 8, 16, 32], index=2, help=help_for('Batch DINOv2'))
 
 c1, c2 = st.columns(2)
-cpu_fallback = c1.checkbox('Fallback DINOv2 para CPU', value=True)
-overwrite = c2.checkbox('Recriar workspace se já existir', value=False)
+cpu_fallback = c1.checkbox('Fallback DINOv2 para CPU', value=True, help=help_for('Fallback DINOv2 para CPU'))
+overwrite = c2.checkbox('Recriar workspace se já existir', value=False, help=help_for('Recriar workspace se já existir'))
 
-if st.button('Executar clusterização', type='primary'):
+if st.button('Executar clusterização', type='primary', help=help_for('Executar clusterização')):
     try:
         if not data_yaml.exists():
             raise FileNotFoundError(data_yaml)

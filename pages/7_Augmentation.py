@@ -11,6 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from contextual_help import help_for, help_text
+
 from tcc_discovery.dataset_augmentation import (
     DEFAULT_AUGMENTATIONS,
     augment_yolo_detection_dataset,
@@ -21,8 +23,8 @@ from tcc_discovery.runtime_config import load_runtime_config, save_runtime_confi
 from tcc_discovery.workspace_registry import add_entry, list_entries
 
 st.set_page_config(page_title='TCC - Augmentation', layout='wide')
-st.title('Data Augmentation')
-st.caption('Etapa independente para datasets YOLO já divididos. Somente o TRAIN é aumentado; VALID e TEST são preservados sem alteração.')
+st.title('Data Augmentation', help=help_for('Data Augmentation'))
+help_text('Etapa independente para datasets YOLO já divididos. Somente o TRAIN é aumentado; VALID e TEST são preservados sem alteração.', caption=True)
 
 st.warning(
     'Regra experimental: augmentation nunca é aplicada em validation/test. Esta página copia esses splits sem modificá-los '
@@ -44,9 +46,9 @@ for path in found:
         source_options.append((value, value))
         seen.add(value)
 labels = [x[0] for x in source_options]
-choice = st.selectbox('Dataset de entrada', labels + ['Digitar/importar caminho...'], index=0 if labels else len(labels))
+choice = st.selectbox('Dataset de entrada', labels + ['Digitar/importar caminho...'], index=0 if labels else len(labels), help=help_for('Dataset de entrada'))
 if choice == 'Digitar/importar caminho...':
-    source_yaml = st.text_input('Caminho do data.yaml', 'data/roboflow/data.yaml')
+    source_yaml = st.text_input('Caminho do data.yaml', 'data/roboflow/data.yaml', help=help_for('Caminho do data.yaml'))
 else:
     source_yaml = source_options[labels.index(choice)][1]
 
@@ -58,20 +60,18 @@ source_ok = False
 try:
     dataset_info = inspect_yolo_detection_dataset(source_preview)
     source_ok = bool(dataset_info['exists']['train'])
-    st.markdown('#### Dataset detectado')
+    st.subheader('Dataset detectado', help=help_for('Dataset'))
     m1, m2, m3 = st.columns(3)
-    m1.metric('Train', dataset_info['images']['train'])
-    m2.metric('Validation', dataset_info['images']['val'])
-    m3.metric('Test', dataset_info['images']['test'])
+    m1.metric('Train', dataset_info['images']['train'], help=help_for('Train'))
+    m2.metric('Validation', dataset_info['images']['val'], help=help_for('Validation'))
+    m3.metric('Test', dataset_info['images']['test'], help=help_for('Test'))
     with st.expander('Ver caminhos resolvidos'):
         st.write('data.yaml:', dataset_info['data_yaml'])
         st.write('TRAIN:', dataset_info['resolved']['train'])
         st.write('VALID:', dataset_info['resolved']['val'])
         st.write('TEST:', dataset_info['resolved']['test'])
-        st.caption(
-            'Exports Roboflow com caminhos como ../train/images são corrigidos automaticamente quando '
-            'as pastas train/valid/test estão ao lado do data.yaml.'
-        )
+        help_text('Exports Roboflow com caminhos como ../train/images são corrigidos automaticamente quando '
+            'as pastas train/valid/test estão ao lado do data.yaml.', caption=True)
     if not source_ok:
         st.error('O split TRAIN ainda não pôde ser localizado. Confira o data.yaml e a estrutura de pastas.')
 except Exception as exc:
@@ -80,9 +80,9 @@ except Exception as exc:
 
 out_entries = list_entries('augmentation_outputs')
 out_labels = [f"{e['name']} — {e['value']}" for e in out_entries]
-out_choice = st.selectbox('Dataset de saída', out_labels + ['➕ Criar novo dataset aumentado'])
+out_choice = st.selectbox('Dataset de saída', out_labels + ['➕ Criar novo dataset aumentado'], help=help_for('Dataset de saída'))
 if out_choice == '➕ Criar novo dataset aumentado':
-    dataset_name = st.text_input('Nome do dataset aumentado', 'roboflow_augmented_v1')
+    dataset_name = st.text_input('Nome do dataset aumentado', 'roboflow_augmented_v1', help=help_for('Nome do dataset aumentado'))
     output_dir = st.text_input('Pasta de saída', f'data/augmented/{dataset_name}')
 else:
     entry = out_entries[out_labels.index(out_choice)]
@@ -90,13 +90,13 @@ else:
     output_dir = str(entry['value'])
 
 c1, c2, c3, c4 = st.columns(4)
-copies = c1.number_input('Cópias aumentadas por imagem de treino', 1, 20, 3)
-size = c2.selectbox('Tamanho final', [512, 640, 768, 1024, 1280], index=1)
-aggressive = c3.checkbox('Augmentation agressiva', value=True)
-mosaic = c4.checkbox('Gerar mosaicos 2x2', value=True)
+copies = c1.number_input('Cópias aumentadas por imagem de treino', 1, 20, 3, help=help_for('Cópias aumentadas por imagem de treino'))
+size = c2.selectbox('Tamanho final', [512, 640, 768, 1024, 1280], index=1, help=help_for('Tamanho final'))
+aggressive = c3.checkbox('Augmentation agressiva', value=True, help=help_for('Augmentation agressiva'))
+mosaic = c4.checkbox('Gerar mosaicos 2x2', value=True, help=help_for('Gerar mosaicos 2x2'))
 
-seed = st.number_input('Seed', 0, 2_147_483_647, 42)
-overwrite = st.checkbox('Recriar dataset de saída', value=False)
+seed = st.number_input('Seed', 0, 2_147_483_647, 42, help=help_for('Seed'))
+overwrite = st.checkbox('Recriar dataset de saída', value=False, help=help_for('Recriar dataset de saída'))
 
 st.markdown('#### Operações')
 cols = st.columns(4)
@@ -118,15 +118,15 @@ labels_pt = {
 }
 for i, key in enumerate(DEFAULT_AUGMENTATIONS):
     with cols[i % 4]:
-        enabled[key] = st.checkbox(labels_pt.get(key, key), value=True, key=f'aug_{key}')
+        enabled[key] = st.checkbox(labels_pt.get(key, key), value=True, key=f'aug_{key}', help=help_for(labels_pt.get(key, key)))
 
-st.markdown('#### Proteções de split')
+st.subheader('Proteções de split', help=help_for('split'))
 a, b, c = st.columns(3)
-a.checkbox('Manter imagens originais de train', value=True, disabled=True)
-b.checkbox('Preservar validation sem augmentation', value=True, disabled=True)
-c.checkbox('Preservar test sem augmentation', value=True, disabled=True)
+a.checkbox('Manter imagens originais de train', value=True, disabled=True, help=help_for('Manter imagens originais de train'))
+b.checkbox('Preservar validation sem augmentation', value=True, disabled=True, help=help_for('Preservar validation sem augmentation'))
+c.checkbox('Preservar test sem augmentation', value=True, disabled=True, help=help_for('Preservar test sem augmentation'))
 
-if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
+if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok, help=help_for('Gerar dataset aumentado')):
     try:
         source = Path(source_yaml)
         if not source.is_absolute():
@@ -161,9 +161,9 @@ if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
             eta = (elapsed / ratio - elapsed) if ratio > 0 else 0.0
             progress_bar.progress(ratio, text=f'{ratio * 100:5.1f}% · {message}')
             eta_text = fmt_seconds(eta) if ratio > 0 else 'calculando...'
-            time_box.caption(
+            help_text(
                 f'Decorrido: {fmt_seconds(elapsed)} · ETA aproximada: {eta_text} · '
-                f'Operações: {done}/{total}'
+                f'Operações: {done}/{total}', caption=True, target=time_box
             )
 
         log_cb('Iniciando processamento. A tela será atualizada automaticamente; não é necessário clicar em atualizar.')
@@ -191,17 +191,17 @@ if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
         add_entry('datasets', dataset_name, output_yaml, metadata={'source': str(source)})
         st.success('Dataset aumentado criado.')
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric('Train original', result['source_train_images'])
-        m2.metric('Novas augmentations', result['generated_augmented_train'])
-        m3.metric('Mosaicos', result['generated_mosaics_train'])
-        m4.metric('Train final', result['final_train_images'])
-        st.write('Validation preservado:', result['validation_images_unchanged'])
-        st.write('Test preservado:', result['test_images_unchanged'])
+        m1.metric('Train original', result['source_train_images'], help=help_for('Train original'))
+        m2.metric('Novas augmentations', result['generated_augmented_train'], help=help_for('Novas augmentations'))
+        m3.metric('Mosaicos', result['generated_mosaics_train'], help=help_for('Mosaicos'))
+        m4.metric('Train final', result['final_train_images'], help=help_for('Train final'))
+        help_text(f"Validation preservado: {result['validation_images_unchanged']}")
+        help_text(f"Test preservado: {result['test_images_unchanged']}")
 
         b1, b2, b3 = st.columns(3)
-        b1.metric('Boxes lidas no train', result.get('bbox_labels_total', 0))
-        b2.metric('Boxes corrigidas na borda', result.get('bbox_labels_corrected_at_border', 0))
-        b3.metric('Boxes inválidas ignoradas', result.get('bbox_labels_skipped_invalid', 0))
+        b1.metric('Boxes lidas no train', result.get('bbox_labels_total', 0), help=help_for('Boxes lidas no train'))
+        b2.metric('Boxes corrigidas na borda', result.get('bbox_labels_corrected_at_border', 0), help=help_for('Boxes corrigidas na borda'))
+        b3.metric('Boxes inválidas ignoradas', result.get('bbox_labels_skipped_invalid', 0), help=help_for('Boxes inválidas ignoradas'))
         if result.get('bbox_labels_corrected_at_border', 0):
             st.info(
                 'Algumas boxes encostavam na borda da imagem e tinham pequenas diferenças de arredondamento. '
@@ -221,9 +221,9 @@ if st.button('Gerar dataset aumentado', type='primary', disabled=not source_ok):
 if st.session_state.get('last_augmented_yaml'):
     st.divider()
     st.markdown('#### Enviar para o treinamento')
-    st.write('O dataset abaixo já está pronto para ser selecionado no treinamento:')
+    help_text('O dataset abaixo já está pronto para ser selecionado no treinamento:')
     st.code(st.session_state['last_augmented_yaml'])
-    if st.button('Usar este dataset como det_general em configs/runtime.yaml'):
+    if st.button('Usar este dataset como det_general em configs/runtime.yaml', help=help_for('Usar este dataset como det_general em configs/runtime.yaml')):
         runtime_path = REPO_ROOT / 'configs' / 'runtime.yaml'
         runtime = load_runtime_config(runtime_path)
         value = Path(st.session_state['last_augmented_yaml'])
